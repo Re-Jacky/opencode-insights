@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { execFile } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, realpathSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { homedir } from "node:os";
@@ -436,7 +436,12 @@ function usage() {
 
 function isDirectRun() {
   const entry = process.argv[1];
-  return !!entry && pathToFileURL(entry).href === import.meta.url;
+  if (!entry) return false;
+  try {
+    return pathToFileURL(realpathSync(entry)).href === import.meta.url;
+  } catch {
+    return pathToFileURL(entry).href === import.meta.url;
+  }
 }
 
 if (isDirectRun()) {
