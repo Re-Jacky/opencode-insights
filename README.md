@@ -139,6 +139,34 @@ This reconstructs:
 - Experimental `messages.transform` and `system.transform`
 - Assistant response events
 
+### Sessions
+
+List reconstructed sessions with title, last update time, message count, hook count, and response count:
+
+```bash
+opencode-insights sessions --limit 5000
+```
+
+Machine-readable output:
+
+```bash
+opencode-insights sessions --limit 5000 --json
+```
+
+### Show Or Export One Session
+
+Print one reconstructed session:
+
+```bash
+opencode-insights show ses_xxx --limit 10000
+```
+
+Export one session to JSON:
+
+```bash
+opencode-insights export ses_xxx --limit 10000 --output ./session.json
+```
+
 ### Web Viewer
 
 ```bash
@@ -157,6 +185,12 @@ Direct repo fallback:
 node /Users/zyao/Desktop/opencode-insights/dist/cli.js serve --limit 5000 --port 8765
 ```
 
+Start the viewer and open the browser automatically:
+
+```bash
+opencode-insights open --limit 5000 --port 8765
+```
+
 The viewer shows:
 
 - `MSG` rows for user messages.
@@ -164,6 +198,20 @@ The viewer shows:
 - `Summary`, `Request`, `Response`, and `Raw` tabs.
 - Expandable/collapsible JSON trees.
 - `Expand All` / `Collapse All` controls for JSON tabs.
+
+### Doctor And Maintenance
+
+Check where the plugin is storing data, whether SQLite is readable, row counts by capture kind, and DB integrity:
+
+```bash
+opencode-insights doctor
+```
+
+Compact the local SQLite database after heavy testing:
+
+```bash
+opencode-insights vacuum
+```
 
 ## Understanding Captured Hooks
 
@@ -286,14 +334,3 @@ Then configure OpenCode to load:
   "tui": ["opencode-insights/tui"]
 }
 ```
-
-## CLI Roadmap
-
-Useful next commands to add:
-
-- `opencode-insights sessions`: list sessions with title, last updated time, message count, and hook count.
-- `opencode-insights show <session-id>`: print one reconstructed session.
-- `opencode-insights open`: start the viewer and open the browser.
-- `opencode-insights doctor`: check DB path, table schema, row counts, OpenCode package install, and plugin version.
-- `opencode-insights export <session-id>`: export a session as JSON for sharing/debugging.
-- `opencode-insights vacuum`: compact the SQLite DB after heavy local testing.

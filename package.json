@@ -4,6 +4,7 @@
   "version": "0.1.0",
   "description": "OpenCode plugin for local request capture, TPS metrics, and subagent status visibility.",
   "type": "module",
+  "author": "opencode-insights contributors",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "bin": {
@@ -31,7 +32,9 @@
     "build": "tsup",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
-    "verify": "npm run typecheck && npm run test && npm run build"
+    "verify": "npm run typecheck && npm run test && npm run build",
+    "prepack": "npm run build",
+    "prepublishOnly": "npm run verify"
   },
   "keywords": [
     "opencode",

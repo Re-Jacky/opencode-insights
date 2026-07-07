@@ -1,55 +1,115 @@
 #!/usr/bin/env node
+import { execFile } from "node:child_process";
+import { existsSync } from "node:fs";
+import { mkdir, writeFile } from "node:fs/promises";
+import { dirname } from "node:path";
+import { pathToFileURL } from "node:url";
+import { promisify } from "node:util";
+import { resolveCapturePath } from "./capture.js";
 import { buildRequestHistory, formatCaptureSummary, readRecentCaptures } from "./inspect.js";
 import { serveViewer } from "./viewer.js";
+
+const execFileAsync = promisify(execFile);
+const DEFAULT_RECENT_LIMIT = 20;
+const DEFAULT_HISTORY_LIMIT = 5_000;
 
 type CliOptions = {
   dbPath?: string | undefined;
   dataDir?: string | undefined;
   limit: number;
+  limitProvided: boolean;
   json: boolean;
   host?: string | undefined;
   port?: number | undefined;
+  output?: string | undefined;
 };
 
 async function main(argv: string[]) {
   const command = argv[2] ?? "recent";
   const options = parseOptions(argv.slice(3));
+  const positionals = parsePositionals(argv.slice(3));
+
+  if (command === "help" || command === "--help" || command === "-h") {
+    process.stdout.write(`${usage()}\n`);
+    return;
+  }
 
   if (command === "recent") {
-    const records = await readRecentCaptures(options);
+    const records = await readRecentCaptures({ ...options, limit: options.limitProvided ? options.limit : DEFAULT_RECENT_LIMIT });
     process.stdout.write(options.json ? `${JSON.stringify(records, null, 2)}\n` : `${formatCaptureSummary(records)}\n`);
     return;
   }
 
   if (command === "history") {
-    const records = await readRecentCaptures(options);
+    const records = await readRecentCaptures(historyReadOptions(options));
     const history = buildRequestHistory(records);
     process.stdout.write(`${JSON.stringify(history, null, 2)}\n`);
     return;
   }
 
+  if (command === "sessions") {
+    const records = await readRecentCaptures(historyReadOptions(options));
+    const history = buildRequestHistory(records);
+    const rows = summarizeSessions(history.sessions);
+    process.stdout.write(options.json ? `${JSON.stringify(rows, null, 2)}\n` : `${formatSessionSummary(rows)}\n`);
+    return;
+  }
+
+  if (command === "show") {
+    const sessionID = positionals[0];
+    if (!sessionID) throw new Error("Missing session id. Usage: opencode-insights show <session-id>");
+    const session = await readSession(sessionID, options);
+    process.stdout.write(`${JSON.stringify(session, null, 2)}\n`);
+    return;
+  }
+
+  if (command === "export") {
+    const sessionID = positionals[0];
+    if (!sessionID) throw new Error("Missing session id. Usage: opencode-insights export <session-id> [--output PATH]");
+    const session = await readSession(sessionID, options);
+    const json = `${JSON.stringify(session, null, 2)}\n`;
+    if (options.output) {
+      await mkdir(dirname(options.output), { recursive: true });
+      await writeFile(options.output, json, "utf8");
+      process.stdout.write(`Exported ${sessionID} to ${options.output}\n`);
+    } else {
+      process.stdout.write(json);
+    }
+    return;
+  }
+
   if (command === "serve") {
-    const viewer = await serveViewer(options);
+    const viewer = await serveViewer({ ...options, limit: options.limitProvided ? options.limit : DEFAULT_HISTORY_LIMIT });
     process.stdout.write(`OpenCode Insights viewer listening at ${viewer.url}\n`);
+    return;
+  }
+
+  if (command === "open") {
+    const viewer = await serveViewer({ ...options, limit: options.limitProvided ? options.limit : DEFAULT_HISTORY_LIMIT });
+    await openBrowser(viewer.url);
+    process.stdout.write(`OpenCode Insights viewer listening at ${viewer.url}\n`);
+    return;
+  }
+
+  if (command === "doctor") {
+    process.stdout.write(`${await runDoctor(options)}\n`);
+    return;
+  }
+
+  if (command === "vacuum") {
+    process.stdout.write(`${await vacuumDatabase(options)}\n`);
     return;
   }
 
   {
     process.stderr.write(`Unknown command: ${command}\n`);
-    process.stderr.write(
-      [
-        "Usage:",
-        "  opencode-insights recent [--db PATH] [--data-dir DIR] [--limit N] [--json]",
-        "  opencode-insights history [--db PATH] [--data-dir DIR] [--limit N]",
-        "  opencode-insights serve [--db PATH] [--data-dir DIR] [--limit N] [--host HOST] [--port PORT]"
-      ].join("\n") + "\n"
-    );
+    process.stderr.write(`${usage()}\n`);
     process.exitCode = 1;
   }
 }
 
-function parseOptions(args: string[]): CliOptions {
-  const options: CliOptions = { limit: 20, json: false };
+export function parseOptions(args: string[]): CliOptions {
+  const options: CliOptions = { limit: DEFAULT_RECENT_LIMIT, limitProvided: false, json: false };
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index];
     if (arg === "--json") {
@@ -64,6 +124,7 @@ function parseOptions(args: string[]): CliOptions {
       index += 1;
     } else if (arg === "--limit") {
       options.limit = Number.parseInt(args[index + 1] ?? "20", 10);
+      options.limitProvided = true;
       index += 1;
     } else if (arg === "--host") {
       const value = args[index + 1];
@@ -72,14 +133,179 @@ function parseOptions(args: string[]): CliOptions {
     } else if (arg === "--port") {
       options.port = Number.parseInt(args[index + 1] ?? "8765", 10);
       index += 1;
+    } else if (arg === "--output" || arg === "-o") {
+      const value = args[index + 1];
+      if (value) options.output = value;
+      index += 1;
     }
   }
-  if (!Number.isFinite(options.limit) || options.limit < 1) options.limit = 20;
+  if (!Number.isFinite(options.limit) || options.limit < 1) options.limit = DEFAULT_RECENT_LIMIT;
   if (options.port !== undefined && (!Number.isFinite(options.port) || options.port < 1)) options.port = 8765;
   return options;
 }
 
-main(process.argv).catch((error: unknown) => {
-  process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
-  process.exitCode = 1;
-});
+function parsePositionals(args: string[]) {
+  const positionals: string[] = [];
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index];
+    if (!arg) continue;
+    if (arg.startsWith("--")) {
+      if (["--db", "--data-dir", "--limit", "--host", "--port", "--output"].includes(arg)) index += 1;
+      continue;
+    }
+    if (arg === "-o") {
+      index += 1;
+      continue;
+    }
+    positionals.push(arg);
+  }
+  return positionals;
+}
+
+function historyReadOptions(options: CliOptions) {
+  return { ...options, limit: options.limitProvided ? options.limit : DEFAULT_HISTORY_LIMIT };
+}
+
+async function readSession(sessionID: string, options: CliOptions) {
+  const records = await readRecentCaptures(historyReadOptions(options));
+  const session = buildRequestHistory(records).sessions.find((item) => item.id === sessionID);
+  if (!session) {
+    throw new Error(
+      `Session not found in the latest ${historyReadOptions(options).limit} capture rows: ${sessionID}. Try --limit 20000 or check opencode-insights sessions.`
+    );
+  }
+  return session;
+}
+
+export function summarizeSessions(sessions: ReturnType<typeof buildRequestHistory>["sessions"]) {
+  return sessions.map((session) => {
+    const hookCount = session.requests.length;
+    const responseCount = session.messages.filter((message) => message.response).length;
+    const updatedAt = session.updatedAt ?? Math.max(0, ...session.messages.map((message) => message.completedAt ?? message.createdAt ?? 0));
+    return {
+      id: session.id,
+      title: session.title ?? "",
+      updatedAt: updatedAt || undefined,
+      messages: session.messages.length,
+      hooks: hookCount,
+      responses: responseCount
+    };
+  });
+}
+
+export function formatSessionSummary(rows: ReturnType<typeof summarizeSessions>) {
+  if (rows.length === 0) return "No sessions found.";
+  const header = ["updated".padEnd(24), "messages".padStart(8), "hooks".padStart(6), "responses".padStart(9), "session".padEnd(28), "title"].join(
+    "  "
+  );
+  const body = rows.map((row) =>
+    [
+      (row.updatedAt ? new Date(row.updatedAt).toISOString() : "-").padEnd(24),
+      String(row.messages).padStart(8),
+      String(row.hooks).padStart(6),
+      String(row.responses).padStart(9),
+      row.id.padEnd(28),
+      row.title || "-"
+    ].join("  ")
+  );
+  return [header, ...body].join("\n");
+}
+
+async function openBrowser(url: string) {
+  const platform = process.platform;
+  if (platform === "darwin") {
+    await execFileAsync("open", [url]);
+    return;
+  }
+  if (platform === "win32") {
+    await execFileAsync("cmd", ["/c", "start", "", url]);
+    return;
+  }
+  await execFileAsync("xdg-open", [url]);
+}
+
+async function runDoctor(options: CliOptions) {
+  const dbPath = resolveCapturePath(options);
+  const jsonlPath = dbPath.endsWith(".sqlite") ? `${dbPath}.jsonl` : dbPath;
+  const rows = [
+    `OpenCode Insights doctor`,
+    `DB path: ${dbPath}`,
+    `DB exists: ${existsSync(dbPath) ? "yes" : "no"}`,
+    `JSONL fallback exists: ${existsSync(jsonlPath) ? "yes" : "no"}`
+  ];
+
+  if (existsSync(dbPath)) {
+    rows.push(...(await sqliteDiagnostics(dbPath)));
+  } else if (existsSync(jsonlPath)) {
+    const records = await readRecentCaptures({ ...options, limit: options.limitProvided ? options.limit : DEFAULT_HISTORY_LIMIT });
+    rows.push(`Readable fallback records: ${records.length}`);
+  }
+
+  return rows.join("\n");
+}
+
+async function sqliteDiagnostics(dbPath: string) {
+  const diagnostics: string[] = [];
+  try {
+    const tableRows = await sqliteJsonQuery(dbPath, "select name from sqlite_master where type='table' order by name;");
+    const tables = tableRows.filter((row) => typeof row.name === "string").map((row) => row.name);
+    diagnostics.push(`SQLite CLI: yes`);
+    diagnostics.push(`Tables: ${tables.join(", ") || "-"}`);
+    if (tables.includes("captures")) {
+      const captureRows = await sqliteJsonQuery(dbPath, "select count(*) as captures from captures;");
+      const kindRows = await sqliteJsonQuery(dbPath, "select kind, count(*) as count from captures group by kind order by kind;");
+      const captureRow = captureRows.find((row) => typeof row.captures === "number");
+      diagnostics.push(`Capture rows: ${captureRow?.captures ?? "unknown"}`);
+      diagnostics.push(`Capture kinds: ${kindRows.map((row) => `${row.kind}=${row.count}`).join(", ") || "-"}`);
+    } else {
+      diagnostics.push("Capture rows: unavailable (missing captures table)");
+    }
+    const integrityRows = await sqliteJsonQuery(dbPath, "pragma integrity_check;");
+    const integrity = integrityRows.find((row) => typeof row.integrity_check === "string");
+    diagnostics.push(`Integrity: ${integrity?.integrity_check ?? "unknown"}`);
+  } catch (error) {
+    diagnostics.push(`SQLite CLI: unavailable or failed (${error instanceof Error ? error.message : String(error)})`);
+    const records = await readRecentCaptures({ dbPath, limit: DEFAULT_RECENT_LIMIT });
+    diagnostics.push(`Readable records via fallback: ${records.length}`);
+  }
+  return diagnostics;
+}
+
+async function sqliteJsonQuery(dbPath: string, sql: string) {
+  const { stdout } = await execFileAsync("sqlite3", ["-json", dbPath, sql], { maxBuffer: 128 * 1024 * 1024 });
+  return stdout.trim() ? (JSON.parse(stdout) as Record<string, unknown>[]) : [];
+}
+
+async function vacuumDatabase(options: CliOptions) {
+  const dbPath = resolveCapturePath(options);
+  if (!existsSync(dbPath)) return `No SQLite DB found at ${dbPath}`;
+  await execFileAsync("sqlite3", [dbPath, "vacuum;"]);
+  return `Vacuumed ${dbPath}`;
+}
+
+function usage() {
+  return [
+    "Usage:",
+    "  opencode-insights recent [--db PATH] [--data-dir DIR] [--limit N] [--json]",
+    "  opencode-insights sessions [--db PATH] [--data-dir DIR] [--limit N] [--json]",
+    "  opencode-insights history [--db PATH] [--data-dir DIR] [--limit N]",
+    "  opencode-insights show <session-id> [--db PATH] [--data-dir DIR] [--limit N]",
+    "  opencode-insights export <session-id> [--output PATH] [--db PATH] [--data-dir DIR] [--limit N]",
+    "  opencode-insights serve [--db PATH] [--data-dir DIR] [--limit N] [--host HOST] [--port PORT]",
+    "  opencode-insights open [--db PATH] [--data-dir DIR] [--limit N] [--host HOST] [--port PORT]",
+    "  opencode-insights doctor [--db PATH] [--data-dir DIR]",
+    "  opencode-insights vacuum [--db PATH] [--data-dir DIR]"
+  ].join("\n");
+}
+
+function isDirectRun() {
+  const entry = process.argv[1];
+  return !!entry && pathToFileURL(entry).href === import.meta.url;
+}
+
+if (isDirectRun()) {
+  main(process.argv).catch((error: unknown) => {
+    process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
+    process.exitCode = 1;
+  });
+}
