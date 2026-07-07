@@ -17,7 +17,7 @@ Install the packed plugin from your OpenCode config/package directory:
 
 ```bash
 cd ~/.config/opencode
-npm i /Users/zyao/Desktop/opencode-insights/opencode-insights-0.1.0.tgz
+npm i /Users/zyao/Desktop/opencode-insights/rejacky-opencode-insights-0.1.0.tgz
 npx opencode-insights configure
 ```
 
@@ -38,7 +38,7 @@ cd /Users/zyao/Desktop/opencode-insights
 npm link
 
 cd ~/.config/opencode
-npm link opencode-insights
+npm link @rejacky/opencode-insights
 ```
 
 After code changes:
@@ -78,7 +78,7 @@ Review package contents:
 
 ```bash
 npm pack
-tar -tf opencode-insights-0.1.0.tgz
+tar -tf rejacky-opencode-insights-0.1.0.tgz
 ```
 
 Publish:
@@ -92,6 +92,6 @@ After publishing, users should be able to install from their OpenCode config/pac
 
 ```bash
 cd ~/.config/opencode
-npm i opencode-insights
+npm i @rejacky/opencode-insights
 npx opencode-insights configure
 ```

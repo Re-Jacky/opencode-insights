@@ -13,8 +13,8 @@ import { serveViewer } from "./viewer.js";
 const execFileAsync = promisify(execFile);
 const DEFAULT_RECENT_LIMIT = 20;
 const DEFAULT_HISTORY_LIMIT = 5_000;
-const SERVER_PLUGIN_SPEC = "opencode-insights";
-const TUI_PLUGIN_SPEC = "opencode-insights/tui";
+const SERVER_PLUGIN_SPEC = "@rejacky/opencode-insights";
+const TUI_PLUGIN_SPEC = "@rejacky/opencode-insights/tui";
 
 type CliOptions = {
   dbPath?: string | undefined;

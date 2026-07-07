@@ -71,8 +71,8 @@ describe("cli helpers", () => {
       const opencode = JSON.parse(await readFile(join(dir, "opencode.jsonc"), "utf8")) as { plugin: string[] };
       const tui = JSON.parse(await readFile(join(dir, "tui.json"), "utf8")) as { plugin: string[] };
       expect(output).toContain("Configuration written");
-      expect(opencode.plugin).toEqual(["existing", "opencode-insights"]);
-      expect(tui.plugin).toEqual(["opencode-insights/tui"]);
+      expect(opencode.plugin).toEqual(["existing", "@rejacky/opencode-insights"]);
+      expect(tui.plugin).toEqual(["@rejacky/opencode-insights/tui"]);
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
@@ -93,7 +93,7 @@ describe("cli helpers", () => {
 
       const tui = JSON.parse(await readFile(join(dir, "tui.json"), "utf8")) as { plugin: string[] };
       const jsonc = await readFile(join(dir, "tui.jsonc"), "utf8");
-      expect(tui.plugin).toEqual(["opencode-insights/tui"]);
+      expect(tui.plugin).toEqual(["@rejacky/opencode-insights/tui"]);
       expect(jsonc).toContain("existing-tui");
     } finally {
       await rm(dir, { recursive: true, force: true });

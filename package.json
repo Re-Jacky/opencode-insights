@@ -1,6 +1,6 @@
 {
   "$schema": "https://json.schemastore.org/package.json",
-  "name": "opencode-insights",
+  "name": "@rejacky/opencode-insights",
   "version": "0.1.0",
   "description": "OpenCode plugin for local request capture, TPS metrics, and subagent status visibility.",
   "type": "module",

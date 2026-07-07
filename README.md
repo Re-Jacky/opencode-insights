@@ -8,7 +8,7 @@ Install from your OpenCode config/package directory:
 
 ```bash
 cd ~/.config/opencode
-npm i opencode-insights
+npm i @rejacky/opencode-insights
 npx opencode-insights configure
 ```
 
@@ -19,14 +19,14 @@ Restart OpenCode after configuring the plugin.
 ```json
 // ~/.config/opencode/opencode.json or opencode.jsonc
 {
-  "plugin": ["opencode-insights"]
+  "plugin": ["@rejacky/opencode-insights"]
 }
 ```
 
 ```json
 // ~/.config/opencode/tui.json
 {
-  "plugin": ["opencode-insights/tui"]
+  "plugin": ["@rejacky/opencode-insights/tui"]
 }
 ```
 
@@ -38,7 +38,7 @@ npx opencode-insights configure --dry-run
 
 OpenCode 1.17.14 loads `tui.json` for TUI plugins. It does not load `tui.jsonc`, so `configure` always writes the TUI plugin entry to `tui.json`.
 
-The TUI plugin value is the package export `opencode-insights/tui`, not an absolute `dist/tui.js` path.
+The TUI plugin value is the package export `@rejacky/opencode-insights/tui`, not an absolute `dist/tui.js` path.
 
 OpenCode resolves TUI plugin entries through module resolution, so this works after installing the package in your OpenCode config/package directory.
 
@@ -146,7 +146,7 @@ You can override storage in `opencode.json` or `opencode.jsonc`:
 {
   "plugin": [
     [
-      "opencode-insights",
+      "@rejacky/opencode-insights",
       {
         "dbPath": "/absolute/path/to/insights.sqlite"
       }
