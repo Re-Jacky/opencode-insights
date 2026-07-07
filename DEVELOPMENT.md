@@ -73,11 +73,13 @@ One-time npm setup:
 
 1. Go to npm package settings for `@rejacky/opencode-insights`.
 2. Open the package publishing / trusted publishing settings.
-3. Add a trusted publisher for this GitHub repository.
+3. Add a trusted publisher for repository `Re-Jacky/opencode-insights`.
 4. Use workflow file `.github/workflows/publish.yml`.
 5. Keep the package public.
 
 No `NPM_TOKEN` secret is needed when npm trusted publishing is configured. The workflow uses GitHub OIDC plus `npm publish --provenance`.
+
+If GitHub Actions fails with `404 Not Found - PUT https://registry.npmjs.org/@rejacky%2fopencode-insights`, npm found the registry but rejected package write access. Check that the npm package's trusted publisher entry exactly matches the GitHub owner, repo, and workflow file path above. Also confirm the npm account configuring trusted publishing owns or has publish access to `@rejacky/opencode-insights`.
 
 Release flow:
 

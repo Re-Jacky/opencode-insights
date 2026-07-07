@@ -5,6 +5,14 @@
   "description": "OpenCode plugin for local request capture, TPS metrics, and subagent status visibility.",
   "type": "module",
   "author": "opencode-insights contributors",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Re-Jacky/opencode-insights.git"
+  },
+  "homepage": "https://github.com/Re-Jacky/opencode-insights#readme",
+  "bugs": {
+    "url": "https://github.com/Re-Jacky/opencode-insights/issues"
+  },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "bin": {
@@ -29,6 +37,10 @@
     "README.md",
     "DEVELOPMENT.md"
   ],
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
   "scripts": {
     "build": "tsup",
     "test": "vitest run",
