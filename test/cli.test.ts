@@ -1,11 +1,22 @@
 import { describe, expect, test } from "vitest";
-import { formatSessionSummary, parseOptions, summarizeSessions } from "../src/cli.js";
+import {
+  addUniquePlugin,
+  configureOpenCode,
+  formatSessionSummary,
+  parseOptions,
+  stripJsonCommentsAndTrailingCommas,
+  summarizeSessions
+} from "../src/cli.js";
 import type { HistorySession } from "../src/inspect.js";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 describe("cli helpers", () => {
   test("parses common command options", () => {
     expect(parseOptions(["--db", "/tmp/insights.sqlite", "--limit", "100", "--json", "--port", "9999", "-o", "/tmp/out.json"])).toEqual({
       dbPath: "/tmp/insights.sqlite",
+      dryRun: false,
       limit: 100,
       limitProvided: true,
       json: true,
@@ -19,8 +30,52 @@ describe("cli helpers", () => {
       limit: 20,
       limitProvided: true,
       json: false,
+      dryRun: false,
       port: 8765
     });
+  });
+
+  test("parses configure options", () => {
+    expect(parseOptions(["--config-dir", "/tmp/opencode", "--dry-run"])).toMatchObject({
+      configDir: "/tmp/opencode",
+      dryRun: true
+    });
+  });
+
+  test("strips jsonc comments and trailing commas", () => {
+    expect(JSON.parse(stripJsonCommentsAndTrailingCommas('{ "plugin": ["a",], // keep me parseable\n }'))).toEqual({
+      plugin: ["a"]
+    });
+  });
+
+  test("adds plugin entries once", () => {
+    const config: Record<string, unknown> = { plugin: ["existing"] };
+    expect(addUniquePlugin(config, "next")).toBe(true);
+    expect(addUniquePlugin(config, "next")).toBe(false);
+    expect(config.plugin).toEqual(["existing", "next"]);
+  });
+
+  test("configures opencode and tui plugin files", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "opencode-insights-test-"));
+    try {
+      await writeFile(join(dir, "opencode.jsonc"), '{\n  // existing settings\n  "plugin": ["existing"],\n}\n', "utf8");
+
+      const output = await configureOpenCode({
+        configDir: dir,
+        limit: 20,
+        limitProvided: false,
+        json: false,
+        dryRun: false
+      });
+
+      const opencode = JSON.parse(await readFile(join(dir, "opencode.jsonc"), "utf8")) as { plugin: string[] };
+      const tui = JSON.parse(await readFile(join(dir, "tui.json"), "utf8")) as { plugin: string[] };
+      expect(output).toContain("Configuration written");
+      expect(opencode.plugin).toEqual(["existing", "opencode-insights"]);
+      expect(tui.plugin[0]).toContain("/dist/tui.js");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
   });
 
   test("summarizes reconstructed sessions for terminal output", () => {

@@ -62,12 +62,38 @@ cd ~/.config/opencode
 npm i /Users/zyao/Desktop/opencode-insights/opencode-insights-0.1.0.tgz
 ```
 
-Then configure OpenCode to load both the server plugin and TUI plugin. The exact config file location depends on your OpenCode setup, but the package entries should reference:
+Then configure OpenCode. OpenCode loads the server plugin from `opencode.json` or `opencode.jsonc`, but it loads TUI plugins from a separate `tui.json` file in the same directory.
+
+The easiest path is the explicit installer helper:
+
+```bash
+npx opencode-insights configure
+```
+
+For local repo development without installing the package binary globally:
+
+```bash
+node /Users/zyao/Desktop/opencode-insights/dist/cli.js configure --config-dir ~/.config/opencode
+```
+
+This detects or creates:
+
+- `~/.config/opencode/opencode.json` or existing `~/.config/opencode/opencode.jsonc`
+- `~/.config/opencode/tui.json`
+
+The resulting server config should include:
 
 ```json
 {
-  "plugin": ["opencode-insights"],
-  "tui": ["opencode-insights/tui"]
+  "plugin": ["opencode-insights"]
+}
+```
+
+The resulting `tui.json` should include an absolute path to the built TUI plugin:
+
+```json
+{
+  "plugin": ["/Users/zyao/Desktop/opencode-insights/dist/tui.js"]
 }
 ```
 
@@ -92,6 +118,12 @@ cd /Users/zyao/Desktop/opencode-insights
 npm run build
 ```
 
+Then refresh both config files:
+
+```bash
+node /Users/zyao/Desktop/opencode-insights/dist/cli.js configure --config-dir ~/.config/opencode
+```
+
 ## CLI Commands
 
 The package exposes:
@@ -104,6 +136,26 @@ If the command is not installed globally, run the built CLI directly:
 
 ```bash
 node /Users/zyao/Desktop/opencode-insights/dist/cli.js <command>
+```
+
+### Configure OpenCode
+
+Configure the server plugin in `opencode.json/jsonc` and the TUI plugin in sibling `tui.json`:
+
+```bash
+opencode-insights configure
+```
+
+Preview changes without writing files:
+
+```bash
+opencode-insights configure --dry-run
+```
+
+Use a non-default config directory:
+
+```bash
+opencode-insights configure --config-dir ~/.config/opencode
 ```
 
 ### Recent Captures
@@ -324,13 +376,21 @@ After publishing, users should be able to install from their OpenCode config/pac
 ```bash
 cd ~/.config/opencode
 npm i opencode-insights
+npx opencode-insights configure
 ```
 
-Then configure OpenCode to load:
+That writes or updates `opencode.json/jsonc` with:
 
 ```json
 {
-  "plugin": ["opencode-insights"],
-  "tui": ["opencode-insights/tui"]
+  "plugin": ["opencode-insights"]
+}
+```
+
+And writes or updates sibling `tui.json` with:
+
+```json
+{
+  "plugin": ["/absolute/path/to/node_modules/opencode-insights/dist/tui.js"]
 }
 ```

@@ -1,9 +1,10 @@
 #!/usr/bin/env node
 import { execFile } from "node:child_process";
 import { existsSync } from "node:fs";
-import { mkdir, writeFile } from "node:fs/promises";
-import { dirname } from "node:path";
-import { pathToFileURL } from "node:url";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { dirname, join, sep } from "node:path";
+import { homedir } from "node:os";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 import { resolveCapturePath } from "./capture.js";
 import { buildRequestHistory, formatCaptureSummary, readRecentCaptures } from "./inspect.js";
@@ -22,6 +23,8 @@ type CliOptions = {
   host?: string | undefined;
   port?: number | undefined;
   output?: string | undefined;
+  configDir?: string | undefined;
+  dryRun: boolean;
 };
 
 async function main(argv: string[]) {
@@ -101,6 +104,11 @@ async function main(argv: string[]) {
     return;
   }
 
+  if (command === "configure") {
+    process.stdout.write(`${await configureOpenCode(options)}\n`);
+    return;
+  }
+
   {
     process.stderr.write(`Unknown command: ${command}\n`);
     process.stderr.write(`${usage()}\n`);
@@ -109,11 +117,13 @@ async function main(argv: string[]) {
 }
 
 export function parseOptions(args: string[]): CliOptions {
-  const options: CliOptions = { limit: DEFAULT_RECENT_LIMIT, limitProvided: false, json: false };
+  const options: CliOptions = { limit: DEFAULT_RECENT_LIMIT, limitProvided: false, json: false, dryRun: false };
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index];
     if (arg === "--json") {
       options.json = true;
+    } else if (arg === "--dry-run") {
+      options.dryRun = true;
     } else if (arg === "--db") {
       const value = args[index + 1];
       if (value) options.dbPath = value;
@@ -137,6 +147,10 @@ export function parseOptions(args: string[]): CliOptions {
       const value = args[index + 1];
       if (value) options.output = value;
       index += 1;
+    } else if (arg === "--config-dir") {
+      const value = args[index + 1];
+      if (value) options.configDir = value;
+      index += 1;
     }
   }
   if (!Number.isFinite(options.limit) || options.limit < 1) options.limit = DEFAULT_RECENT_LIMIT;
@@ -150,7 +164,7 @@ function parsePositionals(args: string[]) {
     const arg = args[index];
     if (!arg) continue;
     if (arg.startsWith("--")) {
-      if (["--db", "--data-dir", "--limit", "--host", "--port", "--output"].includes(arg)) index += 1;
+      if (["--db", "--data-dir", "--limit", "--host", "--port", "--output", "--config-dir"].includes(arg)) index += 1;
       continue;
     }
     if (arg === "-o") {
@@ -283,9 +297,136 @@ async function vacuumDatabase(options: CliOptions) {
   return `Vacuumed ${dbPath}`;
 }
 
+type JsonObject = Record<string, unknown>;
+
+export async function configureOpenCode(options: CliOptions) {
+  const configDir = options.configDir ?? defaultOpenCodeConfigDir();
+  const opencodePath = resolveOpenCodeConfigPath(configDir);
+  const tuiPath = join(configDir, "tui.json");
+  const tuiPluginPath = resolveTuiPluginPath();
+
+  const opencodeConfig = await readJsonConfig(opencodePath, { plugin: [] });
+  const tuiConfig = await readJsonConfig(tuiPath, { plugin: [] });
+  const opencodeChanged = addUniquePlugin(opencodeConfig, "opencode-insights");
+  const tuiChanged = addUniquePlugin(tuiConfig, tuiPluginPath);
+
+  const lines = [
+    `OpenCode config: ${opencodePath}`,
+    `TUI config: ${tuiPath}`,
+    `Server plugin: ${opencodeChanged ? "added" : "already present"} (opencode-insights)`,
+    `TUI plugin: ${tuiChanged ? "added" : "already present"} (${tuiPluginPath})`
+  ];
+
+  if (options.dryRun) {
+    lines.push("Dry run: no files written.");
+    return lines.join("\n");
+  }
+
+  await mkdir(configDir, { recursive: true });
+  if (opencodeChanged || !existsSync(opencodePath)) await writeJsonConfig(opencodePath, opencodeConfig);
+  if (tuiChanged || !existsSync(tuiPath)) await writeJsonConfig(tuiPath, tuiConfig);
+  lines.push("Configuration written. Restart OpenCode to load the plugin.");
+  return lines.join("\n");
+}
+
+export function defaultOpenCodeConfigDir() {
+  const override = process.env.OPENCODE_CONFIG_DIR;
+  if (override) return override;
+  if (process.platform === "win32") return join(process.env.APPDATA ?? join(homedir(), "AppData", "Roaming"), "opencode");
+  return join(homedir(), ".config", "opencode");
+}
+
+export function resolveOpenCodeConfigPath(configDir: string) {
+  const jsoncPath = join(configDir, "opencode.jsonc");
+  if (existsSync(jsoncPath)) return jsoncPath;
+  const jsonPath = join(configDir, "opencode.json");
+  if (existsSync(jsonPath)) return jsonPath;
+  return jsonPath;
+}
+
+export function resolveTuiPluginPath() {
+  const currentDir = dirname(fileURLToPath(import.meta.url));
+  if (currentDir.endsWith(`${sep}src`)) return join(dirname(currentDir), "dist", "tui.js");
+  return fileURLToPath(new URL("./tui.js", import.meta.url));
+}
+
+async function readJsonConfig(path: string, fallback: JsonObject) {
+  if (!existsSync(path)) return { ...fallback };
+  const content = await readFile(path, "utf8");
+  const trimmed = content.trim();
+  if (!trimmed) return { ...fallback };
+  try {
+    const parsed = JSON.parse(stripJsonCommentsAndTrailingCommas(trimmed)) as unknown;
+    return isJsonObject(parsed) ? parsed : { ...fallback };
+  } catch (error) {
+    throw new Error(`Could not parse ${path}: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
+export function stripJsonCommentsAndTrailingCommas(input: string) {
+  let output = "";
+  let inString = false;
+  let quote = "";
+  let escaped = false;
+  for (let index = 0; index < input.length; index += 1) {
+    const current = input[index] ?? "";
+    const next = input[index + 1] ?? "";
+    if (inString) {
+      output += current;
+      if (escaped) {
+        escaped = false;
+      } else if (current === "\\") {
+        escaped = true;
+      } else if (current === quote) {
+        inString = false;
+      }
+      continue;
+    }
+    if (current === '"' || current === "'") {
+      inString = true;
+      quote = current;
+      output += current;
+      continue;
+    }
+    if (current === "/" && next === "/") {
+      while (index < input.length && input[index] !== "\n") index += 1;
+      output += "\n";
+      continue;
+    }
+    if (current === "/" && next === "*") {
+      index += 2;
+      while (index < input.length && !(input[index] === "*" && input[index + 1] === "/")) index += 1;
+      index += 1;
+      continue;
+    }
+    output += current;
+  }
+  return output.replace(/,\s*([}\]])/g, "$1");
+}
+
+function isJsonObject(value: unknown): value is JsonObject {
+  return !!value && typeof value === "object" && !Array.isArray(value);
+}
+
+export function addUniquePlugin(config: JsonObject, plugin: string) {
+  const current = Array.isArray(config.plugin) ? config.plugin : [];
+  if (current.includes(plugin)) {
+    config.plugin = current;
+    return false;
+  }
+  config.plugin = [...current, plugin];
+  return true;
+}
+
+async function writeJsonConfig(path: string, config: JsonObject) {
+  await mkdir(dirname(path), { recursive: true });
+  await writeFile(path, `${JSON.stringify(config, null, 2)}\n`, "utf8");
+}
+
 function usage() {
   return [
     "Usage:",
+    "  opencode-insights configure [--config-dir DIR] [--dry-run]",
     "  opencode-insights recent [--db PATH] [--data-dir DIR] [--limit N] [--json]",
     "  opencode-insights sessions [--db PATH] [--data-dir DIR] [--limit N] [--json]",
     "  opencode-insights history [--db PATH] [--data-dir DIR] [--limit N]",
