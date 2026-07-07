@@ -26,7 +26,7 @@ Restart OpenCode after configuring the plugin.
 ```json
 // ~/.config/opencode/tui.json
 {
-  "plugin": ["/absolute/path/to/node_modules/opencode-insights/dist/tui.js"]
+  "plugin": ["opencode-insights/tui"]
 }
 ```
 
@@ -35,6 +35,12 @@ Preview config changes without writing files:
 ```bash
 npx opencode-insights configure --dry-run
 ```
+
+OpenCode 1.17.14 loads `tui.json` for TUI plugins. It does not load `tui.jsonc`, so `configure` always writes the TUI plugin entry to `tui.json`.
+
+The TUI plugin value is the package export `opencode-insights/tui`, not an absolute `dist/tui.js` path.
+
+OpenCode resolves TUI plugin entries through module resolution, so this works after installing the package in your OpenCode config/package directory.
 
 Use a custom OpenCode config directory:
 

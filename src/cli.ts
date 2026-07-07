@@ -2,9 +2,9 @@
 import { execFile } from "node:child_process";
 import { existsSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { dirname, join, sep } from "node:path";
+import { dirname, join } from "node:path";
 import { homedir } from "node:os";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 import { resolveCapturePath } from "./capture.js";
 import { buildRequestHistory, formatCaptureSummary, readRecentCaptures } from "./inspect.js";
@@ -13,6 +13,8 @@ import { serveViewer } from "./viewer.js";
 const execFileAsync = promisify(execFile);
 const DEFAULT_RECENT_LIMIT = 20;
 const DEFAULT_HISTORY_LIMIT = 5_000;
+const SERVER_PLUGIN_SPEC = "opencode-insights";
+const TUI_PLUGIN_SPEC = "opencode-insights/tui";
 
 type CliOptions = {
   dbPath?: string | undefined;
@@ -303,18 +305,17 @@ export async function configureOpenCode(options: CliOptions) {
   const configDir = options.configDir ?? defaultOpenCodeConfigDir();
   const opencodePath = resolveOpenCodeConfigPath(configDir);
   const tuiPath = join(configDir, "tui.json");
-  const tuiPluginPath = resolveTuiPluginPath();
 
   const opencodeConfig = await readJsonConfig(opencodePath, { plugin: [] });
   const tuiConfig = await readJsonConfig(tuiPath, { plugin: [] });
-  const opencodeChanged = addUniquePlugin(opencodeConfig, "opencode-insights");
-  const tuiChanged = addUniquePlugin(tuiConfig, tuiPluginPath);
+  const opencodeChanged = addUniquePlugin(opencodeConfig, SERVER_PLUGIN_SPEC);
+  const tuiChanged = addUniquePlugin(tuiConfig, TUI_PLUGIN_SPEC);
 
   const lines = [
     `OpenCode config: ${opencodePath}`,
     `TUI config: ${tuiPath}`,
-    `Server plugin: ${opencodeChanged ? "added" : "already present"} (opencode-insights)`,
-    `TUI plugin: ${tuiChanged ? "added" : "already present"} (${tuiPluginPath})`
+    `Server plugin: ${opencodeChanged ? "added" : "already present"} (${SERVER_PLUGIN_SPEC})`,
+    `TUI plugin: ${tuiChanged ? "added" : "already present"} (${TUI_PLUGIN_SPEC})`
   ];
 
   if (options.dryRun) {
@@ -342,12 +343,6 @@ export function resolveOpenCodeConfigPath(configDir: string) {
   const jsonPath = join(configDir, "opencode.json");
   if (existsSync(jsonPath)) return jsonPath;
   return jsonPath;
-}
-
-export function resolveTuiPluginPath() {
-  const currentDir = dirname(fileURLToPath(import.meta.url));
-  if (currentDir.endsWith(`${sep}src`)) return join(dirname(currentDir), "dist", "tui.js");
-  return fileURLToPath(new URL("./tui.js", import.meta.url));
 }
 
 async function readJsonConfig(path: string, fallback: JsonObject) {

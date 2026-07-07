@@ -72,7 +72,29 @@ describe("cli helpers", () => {
       const tui = JSON.parse(await readFile(join(dir, "tui.json"), "utf8")) as { plugin: string[] };
       expect(output).toContain("Configuration written");
       expect(opencode.plugin).toEqual(["existing", "opencode-insights"]);
-      expect(tui.plugin[0]).toContain("/dist/tui.js");
+      expect(tui.plugin).toEqual(["opencode-insights/tui"]);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("uses tui json because OpenCode does not load tui jsonc", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "opencode-insights-test-"));
+    try {
+      await writeFile(join(dir, "tui.jsonc"), '{\n  // keep comments parseable\n  "plugin": ["existing-tui"],\n}\n', "utf8");
+
+      await configureOpenCode({
+        configDir: dir,
+        limit: 20,
+        limitProvided: false,
+        json: false,
+        dryRun: false
+      });
+
+      const tui = JSON.parse(await readFile(join(dir, "tui.json"), "utf8")) as { plugin: string[] };
+      const jsonc = await readFile(join(dir, "tui.jsonc"), "utf8");
+      expect(tui.plugin).toEqual(["opencode-insights/tui"]);
+      expect(jsonc).toContain("existing-tui");
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
