@@ -14,7 +14,7 @@ const execFileAsync = promisify(execFile);
 const DEFAULT_RECENT_LIMIT = 20;
 const DEFAULT_HISTORY_LIMIT = 5_000;
 const SERVER_PLUGIN_SPEC = "@rejacky/opencode-insights";
-const TUI_PLUGIN_SPEC = "@rejacky/opencode-insights/tui";
+const TUI_PLUGIN_SPEC = "@rejacky/opencode-insights";
 
 type CliOptions = {
   dbPath?: string | undefined;

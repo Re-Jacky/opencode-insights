@@ -9,7 +9,7 @@ export default defineConfig({
   format: ["esm"],
   dts: true,
   clean: true,
-  sourcemap: true,
+  sourcemap: false,
   external: [
     "@opencode-ai/plugin",
     "@opencode-ai/plugin/tui",

@@ -21,15 +21,18 @@
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
-      "import": "./dist/index.js"
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
     },
     "./tui": {
       "types": "./dist/tui.d.ts",
-      "import": "./dist/tui.js"
+      "import": "./dist/tui.js",
+      "default": "./dist/tui.js"
     },
     "./cli": {
       "types": "./dist/cli.d.ts",
-      "import": "./dist/cli.js"
+      "import": "./dist/cli.js",
+      "default": "./dist/cli.js"
     }
   },
   "files": [

@@ -95,7 +95,7 @@ describe("cli helpers", () => {
       const tui = JSON.parse(await readFile(join(dir, "tui.json"), "utf8")) as { plugin: string[] };
       expect(output).toContain("Configuration written");
       expect(opencode.plugin).toEqual(["existing", "@rejacky/opencode-insights"]);
-      expect(tui.plugin).toEqual(["@rejacky/opencode-insights/tui"]);
+      expect(tui.plugin).toEqual(["@rejacky/opencode-insights"]);
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
@@ -117,7 +117,7 @@ describe("cli helpers", () => {
 
       const tui = JSON.parse(await readFile(join(dir, "tui.json"), "utf8")) as { plugin: string[] };
       const jsonc = await readFile(join(dir, "tui.jsonc"), "utf8");
-      expect(tui.plugin).toEqual(["@rejacky/opencode-insights/tui"]);
+      expect(tui.plugin).toEqual(["@rejacky/opencode-insights"]);
       expect(jsonc).toContain("existing-tui");
     } finally {
       await rm(dir, { recursive: true, force: true });
@@ -133,7 +133,7 @@ describe("cli helpers", () => {
         JSON.stringify({ plugin: ["existing", ["@rejacky/opencode-insights", { dbPath: "/tmp/db.sqlite" }]] }),
         "utf8"
       );
-      await writeFile(join(dir, "tui.json"), JSON.stringify({ plugin: ["@rejacky/opencode-insights/tui", "other-tui"] }), "utf8");
+      await writeFile(join(dir, "tui.json"), JSON.stringify({ plugin: ["@rejacky/opencode-insights", "other-tui"] }), "utf8");
       await writeFile(join(dataDir, "insights.sqlite"), "sqlite", "utf8");
       await writeFile(join(dataDir, "insights.sqlite.jsonl"), "jsonl", "utf8");
 
@@ -165,7 +165,7 @@ describe("cli helpers", () => {
     const dataDir = await mkdtemp(join(tmpdir(), "opencode-insights-data-"));
     try {
       await writeFile(join(dir, "opencode.json"), JSON.stringify({ plugin: ["@rejacky/opencode-insights"] }), "utf8");
-      await writeFile(join(dir, "tui.json"), JSON.stringify({ plugin: ["@rejacky/opencode-insights/tui"] }), "utf8");
+      await writeFile(join(dir, "tui.json"), JSON.stringify({ plugin: ["@rejacky/opencode-insights"] }), "utf8");
       await writeFile(join(dataDir, "insights.sqlite"), "sqlite", "utf8");
 
       const output = await uninstallOpenCode({
