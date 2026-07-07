@@ -1,6 +1,6 @@
 /** @jsxImportSource @opentui/solid */
-import type { TextRenderable } from "@opentui/core";
-import type { TuiPlugin, TuiPluginApi } from "@opencode-ai/plugin/tui";
+import { createTextAttributes, StyledText, type TextChunk, type TextRenderable } from "@opentui/core";
+import type { TuiPlugin, TuiPluginApi, TuiPluginModule } from "@opencode-ai/plugin/tui";
 import { onCleanup } from "solid-js";
 import {
   createMetricsState,
@@ -9,9 +9,19 @@ import {
   recordToolActivity,
   renderMetricsText
 } from "./metrics.js";
-import { applySubagentEvent, createSubagentState, renderSubagentStatus } from "./subagents.js";
+import {
+  applySubagentEvent,
+  createSubagentState,
+  getSubagentSidebarModel,
+  renderSubagentFooter,
+  type SubagentState
+} from "./subagents.js";
 
 type Listener = () => void;
+
+function isSessionID(value: string | undefined): value is string {
+  return typeof value === "string" && value.startsWith("ses");
+}
 
 function PromptRight(props: {
   api: TuiPluginApi;
@@ -43,6 +53,102 @@ function PromptRight(props: {
   );
 }
 
+function ReactiveText(props: {
+  api: TuiPluginApi;
+  text: () => string;
+  subscribe: (listener: Listener) => () => void;
+}) {
+  let text: TextRenderable | undefined;
+
+  const sync = () => {
+    if (!text) return;
+    text.content = props.text();
+    props.api.renderer.requestRender();
+  };
+
+  const unsubscribe = props.subscribe(sync);
+  onCleanup(unsubscribe);
+
+  return (
+    <text
+      ref={(ref: TextRenderable) => {
+        text = ref;
+        sync();
+      }}
+      fg={props.api.theme.current.textMuted}
+    >
+      {props.text()}
+    </text>
+  );
+}
+
+function SubagentSidebar(props: {
+  api: TuiPluginApi;
+  sessionID: string;
+  state: SubagentState;
+  subscribe: (listener: Listener) => () => void;
+}) {
+  let text: TextRenderable | undefined;
+  const titleAttributes = createTextAttributes({ bold: true });
+
+  const sync = () => {
+    if (!text) return;
+    text.content = renderSubagentStyledSidebar(props.state, props.sessionID, props.api, titleAttributes);
+    props.api.renderer.requestRender();
+  };
+
+  const unsubscribe = props.subscribe(sync);
+  const timer = setInterval(sync, 1_000);
+  onCleanup(() => {
+    unsubscribe();
+    clearInterval(timer);
+  });
+
+  return (
+    <text
+      ref={(ref: TextRenderable) => {
+        text = ref;
+        sync();
+      }}
+      fg={props.api.theme.current.textMuted}
+    >
+      {""}
+    </text>
+  );
+}
+
+function renderSubagentStyledSidebar(
+  state: SubagentState,
+  sessionID: string,
+  api: TuiPluginApi,
+  titleAttributes: number
+) {
+  const model = getSubagentSidebarModel(state, sessionID);
+  if (!model) return "";
+
+  const chunks: TextChunk[] = [
+    textChunk(`${model.title}\n`, api.theme.current.text, titleAttributes),
+    textChunk(`${model.summary}\n`, api.theme.current.textMuted)
+  ];
+
+  for (const [index, row] of model.rows.entries()) {
+    if (index > 0) chunks.push(textChunk("\n", api.theme.current.textMuted));
+    chunks.push(textChunk(`${row.title}\n`, api.theme.current.text));
+    chunks.push(textChunk(row.subtitle, api.theme.current.textMuted));
+  }
+
+  return new StyledText(chunks);
+}
+
+function textChunk(text: string, fg?: TextChunk["fg"], attributes?: number): TextChunk {
+  return {
+    __isChunk: true,
+    text,
+    ...(fg === undefined ? {} : { fg }),
+    ...(attributes === undefined ? {} : { attributes })
+  };
+}
+
 const tui: TuiPlugin = async (api) => {
   const metrics = createMetricsState();
   const subagents = createSubagentState();
@@ -68,11 +174,8 @@ const tui: TuiPlugin = async (api) => {
 
   const offMessage = api.event.on("message.updated", (evt) => {
     const info = evt.properties.info;
-    if (info.role !== "assistant") {
-      applySubagentEvent(subagents, evt);
-      bump();
-      return;
-    }
+    if (applySubagentEvent(subagents, evt)) bump();
+    if (info.role !== "assistant") return;
 
     const messageInput: {
       sessionID: string;
@@ -104,6 +207,26 @@ const tui: TuiPlugin = async (api) => {
     bump();
   });
 
+  const offSessionCreated = api.event.on("session.created", (evt) => {
+    if (applySubagentEvent(subagents, evt)) bump();
+  });
+
+  const offSessionUpdated = api.event.on("session.updated", (evt) => {
+    if (applySubagentEvent(subagents, evt)) bump();
+  });
+
+  const offSessionStatus = api.event.on("session.status", (evt) => {
+    if (applySubagentEvent(subagents, evt)) bump();
+  });
+
+  const offSessionIdle = api.event.on("session.idle", (evt) => {
+    if (applySubagentEvent(subagents, evt)) bump();
+  });
+
+  const offSessionError = api.event.on("session.error", (evt) => {
+    if (applySubagentEvent(subagents, evt)) bump();
+  });
+
   const offSlots = api.slots.register({
     slots: {
       session_prompt_right: (_ctx, props) => (
@@ -112,9 +235,9 @@ const tui: TuiPlugin = async (api) => {
           sessionID={props.session_id}
           subscribe={subscribe}
           text={() => {
+            if (!isSessionID(props.session_id)) return "";
             const status = api.state.session.status(props.session_id);
-            const metricText = renderMetricsText(metrics, props.session_id, { idle: status?.type === "idle" });
-            return `${metricText} | ${renderSubagentStatus(subagents)}`;
+            return renderMetricsText(metrics, props.session_id, { idle: status?.type === "idle" });
           }}
         />
       ),
@@ -123,7 +246,22 @@ const tui: TuiPlugin = async (api) => {
           api={api}
           sessionID=""
           subscribe={subscribe}
-          text={() => renderSubagentStatus(subagents)}
+          text={() => ""}
+        />
+      ),
+      sidebar_content: (_ctx, props) => (
+        <SubagentSidebar
+          api={api}
+          sessionID={props.session_id}
+          state={subagents}
+          subscribe={subscribe}
+        />
+      ),
+      sidebar_footer: (_ctx, props) => (
+        <ReactiveText
+          api={api}
+          subscribe={subscribe}
+          text={() => renderSubagentFooter(subagents, props.session_id)}
         />
       )
     }
@@ -133,7 +271,15 @@ const tui: TuiPlugin = async (api) => {
     offDelta();
     offMessage();
     offPart();
+    offSessionCreated();
+    offSessionUpdated();
+    offSessionStatus();
+    offSessionIdle();
+    offSessionError();
   });
 };
 
-export default tui;
+const id = "opencode-insights-tui";
+
+export { id, tui };
+export default { id, tui } satisfies TuiPluginModule;

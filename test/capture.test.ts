@@ -4,8 +4,11 @@ import { tmpdir } from "node:os";
 import { afterEach, describe, expect, test } from "vitest";
 import {
   JsonlCaptureStore,
+  defaultDataDir,
   normalizeChatParamsCapture,
   normalizeEventCapture,
+  normalizeExperimentalChatMessagesTransformCapture,
+  normalizeExperimentalChatSystemTransformCapture,
   normalizeToolCapture
 } from "../src/capture.js";
 
@@ -16,6 +19,10 @@ afterEach(async () => {
 });
 
 describe("full-fidelity local capture", () => {
+  test("uses a cross-platform home directory for default storage", () => {
+    expect(defaultDataDir()).toMatch(/\.opencode-insights$/);
+  });
+
   test("normalizes chat params without redacting headers or body", () => {
     const record = normalizeChatParamsCapture(
       {
@@ -50,6 +57,72 @@ describe("full-fidelity local capture", () => {
       output: {
         options: { headers: { authorization: "Bearer secret" } }
       }
+    });
+  });
+
+  test("indexes event part message ids for response-side lookup", () => {
+    const record = normalizeEventCapture(
+      {
+        type: "message.part.updated",
+        properties: {
+          sessionID: "ses_1",
+          part: {
+            id: "part_1",
+            type: "text",
+            messageID: "msg_assistant",
+            sessionID: "ses_1",
+            text: "assistant response"
+          }
+        }
+      },
+      20
+    );
+
+    expect(record).toMatchObject({
+      kind: "event",
+      sessionID: "ses_1",
+      messageID: "msg_assistant"
+    });
+  });
+
+  test("captures experimental chat transform hooks without redaction", () => {
+    const messages = normalizeExperimentalChatMessagesTransformCapture(
+      {},
+      {
+        messages: [
+          {
+            info: { id: "msg_1", role: "user", sessionID: "ses_1" },
+            parts: [{ type: "text", text: "private prompt", secret: "keep-me" }]
+          }
+        ]
+      },
+      40
+    );
+
+    const system = normalizeExperimentalChatSystemTransformCapture(
+      { sessionID: "ses_1", model: { providerID: "openai", id: "gpt-test" } },
+      { system: ["system secret", "developer instruction"] },
+      50
+    );
+
+    expect(messages).toMatchObject({
+      kind: "experimental.chat.messages.transform",
+      payload: {
+        output: {
+          messages: [
+            {
+              parts: [{ secret: "keep-me" }]
+            }
+          ]
+        }
+      }
+    });
+    expect(system).toMatchObject({
+      kind: "experimental.chat.system.transform",
+      sessionID: "ses_1",
+      providerID: "openai",
+      modelID: "gpt-test",
+      payload: { output: { system: ["system secret", "developer instruction"] } }
     });
   });
 

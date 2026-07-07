@@ -1,28 +1,35 @@
 # opencode-insights
 
-OpenCode plugin for local, full-fidelity request capture plus live session visibility.
+OpenCode plugin for local request visibility, live TPS metrics, and subagent status.
 
-## Features
+## What It Does
 
-- Shows live TPS, average TPS, and average TTFT in the session prompt.
-- Shows subagent status counts, elapsed time, and token/context totals when OpenCode exposes them.
-- Captures OpenCode LLM-related hooks locally without redaction: chat messages, chat params, headers, events, and tool payloads.
+- Shows live TPS, average TPS, and average TTFT in the OpenCode prompt zone.
+- Shows subagent status in the right sidebar: running, done, failed, elapsed time, and token/context usage when OpenCode exposes it.
+- Captures OpenCode hook/event data locally without redaction.
+- Provides a local web viewer for sessions, messages, hooks, request context, system/messages transforms, and assistant responses.
 
-## Local Storage
+## Privacy Model
 
-By default, records are written to:
+This plugin intentionally does not redact anything. It stores data locally exactly as OpenCode exposes it to plugin hooks and events. Captured data can include prompts, system messages, provider metadata, API keys exposed inside hook payloads, tool arguments, headers, reasoning text, and response events.
+
+Use it only on machines where local full-fidelity capture is acceptable.
+
+## Storage
+
+Default database path:
 
 ```text
-~/.local/share/opencode-insights/requests.sqlite
+~/.opencode-insights/insights.sqlite
 ```
 
-When running in an environment without Bun's SQLite runtime, the plugin falls back to:
+If SQLite is unavailable in the plugin runtime, the fallback path is:
 
 ```text
-~/.local/share/opencode-insights/requests.sqlite.jsonl
+~/.opencode-insights/insights.sqlite.jsonl
 ```
 
-You can override this path in plugin options:
+You can override storage in OpenCode config:
 
 ```json
 {
@@ -30,27 +37,263 @@ You can override this path in plugin options:
     [
       "opencode-insights",
       {
-        "dbPath": "/absolute/path/to/requests.sqlite"
+        "dbPath": "/absolute/path/to/insights.sqlite"
       }
     ]
   ]
 }
 ```
 
-## Important Privacy Note
+## Install For Local Testing
 
-This plugin intentionally does not redact anything. It stores request and response-adjacent data exactly as OpenCode exposes it to plugin hooks, including prompts, headers, provider options, tool arguments, and event payloads.
+From this repo:
 
-## Inspect Captures
+```bash
+cd /Users/zyao/Desktop/opencode-insights
+npm install
+npm run verify
+npm pack
+```
 
-After installing the package, view recent local captures with:
+Install the packed plugin from your OpenCode config/package directory:
+
+```bash
+cd ~/.config/opencode
+npm i /Users/zyao/Desktop/opencode-insights/opencode-insights-0.1.0.tgz
+```
+
+Then configure OpenCode to load both the server plugin and TUI plugin. The exact config file location depends on your OpenCode setup, but the package entries should reference:
+
+```json
+{
+  "plugin": ["opencode-insights"],
+  "tui": ["opencode-insights/tui"]
+}
+```
+
+Restart OpenCode after reinstalling. Existing sessions will not gain missing events retroactively, so create a new session to test capture changes.
+
+## Faster Local Iteration
+
+For development, you can link instead of packing each time:
+
+```bash
+cd /Users/zyao/Desktop/opencode-insights
+npm link
+
+cd ~/.config/opencode
+npm link opencode-insights
+```
+
+Still restart OpenCode after rebuilding:
+
+```bash
+cd /Users/zyao/Desktop/opencode-insights
+npm run build
+```
+
+## CLI Commands
+
+The package exposes:
+
+```bash
+opencode-insights <command>
+```
+
+If the command is not installed globally, run the built CLI directly:
+
+```bash
+node /Users/zyao/Desktop/opencode-insights/dist/cli.js <command>
+```
+
+### Recent Captures
 
 ```bash
 opencode-insights recent --limit 20
 ```
 
-For full payload review:
+Full JSON:
 
 ```bash
 opencode-insights recent --limit 20 --json
 ```
+
+Use a custom DB:
+
+```bash
+opencode-insights recent --db ~/.opencode-insights/insights.sqlite --limit 50
+```
+
+### Reconstructed History
+
+```bash
+opencode-insights history --limit 5000
+```
+
+This reconstructs:
+
+- Sessions
+- User messages
+- Hook rows grouped under the correct message
+- Paired `chat.params` and `chat.headers`
+- Experimental `messages.transform` and `system.transform`
+- Assistant response events
+
+### Web Viewer
+
+```bash
+opencode-insights serve --limit 5000 --port 8765
+```
+
+Open:
+
+```text
+http://127.0.0.1:8765/
+```
+
+Direct repo fallback:
+
+```bash
+node /Users/zyao/Desktop/opencode-insights/dist/cli.js serve --limit 5000 --port 8765
+```
+
+The viewer shows:
+
+- `MSG` rows for user messages.
+- `HOOK` rows for OpenCode plugin hooks.
+- `Summary`, `Request`, `Response`, and `Raw` tabs.
+- Expandable/collapsible JSON trees.
+- `Expand All` / `Collapse All` controls for JSON tabs.
+
+## Understanding Captured Hooks
+
+The viewer labels OpenCode hook records as `HOOK` because they are not raw HTTP requests.
+
+Common hook rows:
+
+- `HOOK title`: OpenCode title-generation model call. Usually appears only on the first turn.
+- `HOOK build`: Main assistant response model-call hook.
+- `HOOK messages.transform`: Final conversation messages OpenCode prepared before model execution.
+- `HOOK system.transform`: System prompt strings OpenCode prepared before model execution.
+
+Hook payload meaning:
+
+- `payload.input`: Context OpenCode passed into the plugin hook.
+- `payload.output`: Value returned by the hook, such as model settings or transformed messages.
+- `headers.output.headers`: Headers returned by the headers hook.
+- Response text is captured from OpenCode event stream rows such as `message.part.delta` and `message.part.updated`.
+
+The plugin currently reconstructs a logical LLM request from hooks and events. It does not yet capture the final provider HTTP body unless OpenCode exposes a lower-level transport hook in the future.
+
+## Useful SQLite Queries
+
+Count captured rows:
+
+```bash
+sqlite3 ~/.opencode-insights/insights.sqlite \
+  "select kind, count(*) from captures group by kind order by kind;"
+```
+
+Recent hook records:
+
+```bash
+sqlite3 ~/.opencode-insights/insights.sqlite "
+select datetime(timestamp/1000,'unixepoch','localtime') as time,
+       kind,
+       session_id,
+       message_id,
+       provider_id,
+       model_id
+from captures
+where kind in (
+  'chat.params',
+  'chat.headers',
+  'experimental.chat.messages.transform',
+  'experimental.chat.system.transform'
+)
+order by timestamp desc
+limit 20;
+"
+```
+
+Find text in captured payloads:
+
+```bash
+sqlite3 ~/.opencode-insights/insights.sqlite "
+select datetime(timestamp/1000,'unixepoch','localtime') as time,
+       kind,
+       session_id,
+       message_id,
+       substr(payload_json, 1, 1200) as preview
+from captures
+where payload_json like '%search text%'
+order by timestamp desc
+limit 20;
+"
+```
+
+## Development
+
+Run all checks:
+
+```bash
+npm run verify
+```
+
+Individual commands:
+
+```bash
+npm run typecheck
+npm test
+npm run build
+```
+
+## Publish Checklist
+
+Before publishing:
+
+```bash
+npm run verify
+npm pack --dry-run
+```
+
+Review package contents:
+
+```bash
+npm pack
+tar -tf opencode-insights-0.1.0.tgz
+```
+
+Publish:
+
+```bash
+npm login
+npm publish --access public
+```
+
+After publishing, users should be able to install from their OpenCode config/package directory with:
+
+```bash
+cd ~/.config/opencode
+npm i opencode-insights
+```
+
+Then configure OpenCode to load:
+
+```json
+{
+  "plugin": ["opencode-insights"],
+  "tui": ["opencode-insights/tui"]
+}
+```
+
+## CLI Roadmap
+
+Useful next commands to add:
+
+- `opencode-insights sessions`: list sessions with title, last updated time, message count, and hook count.
+- `opencode-insights show <session-id>`: print one reconstructed session.
+- `opencode-insights open`: start the viewer and open the browser.
+- `opencode-insights doctor`: check DB path, table schema, row counts, OpenCode package install, and plugin version.
+- `opencode-insights export <session-id>`: export a session as JSON for sharing/debugging.
+- `opencode-insights vacuum`: compact the SQLite DB after heavy local testing.

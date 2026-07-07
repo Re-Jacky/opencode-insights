@@ -1,16 +1,24 @@
-import type { Plugin } from "@opencode-ai/plugin";
+import type { Plugin, PluginModule } from "@opencode-ai/plugin";
 import {
   createCaptureStore,
   normalizeChatHeadersCapture,
   normalizeChatMessageCapture,
   normalizeChatParamsCapture,
   normalizeEventCapture,
+  normalizeExperimentalChatMessagesTransformCapture,
+  normalizeExperimentalChatSystemTransformCapture,
   normalizeToolCapture,
   type InsightsOptions
 } from "./capture.js";
 
 export const OpenCodeInsights: Plugin = async (_input, options?: InsightsOptions) => {
   const store = createCaptureStore(options);
+
+  try {
+    await store.initialize?.();
+  } catch {
+    // Capture is best-effort; plugin startup should not block OpenCode.
+  }
 
   async function capture(record: Parameters<typeof store.append>[0]) {
     try {
@@ -36,6 +44,12 @@ export const OpenCodeInsights: Plugin = async (_input, options?: InsightsOptions
     "chat.headers": async (input, output) => {
       await capture(normalizeChatHeadersCapture(input, output));
     },
+    "experimental.chat.messages.transform": async (input, output) => {
+      await capture(normalizeExperimentalChatMessagesTransformCapture(input, output));
+    },
+    "experimental.chat.system.transform": async (input, output) => {
+      await capture(normalizeExperimentalChatSystemTransformCapture(input, output));
+    },
     "tool.execute.before": async (input, output) => {
       await capture(normalizeToolCapture("tool.execute.before", input, output));
     },
@@ -45,8 +59,9 @@ export const OpenCodeInsights: Plugin = async (_input, options?: InsightsOptions
   };
 };
 
-export default OpenCodeInsights;
+export const server = OpenCodeInsights;
+export const id = "opencode-insights";
+export default { id, server } satisfies PluginModule;
 export * from "./capture.js";
 export * from "./metrics.js";
 export * from "./subagents.js";
-

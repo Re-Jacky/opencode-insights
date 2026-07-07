@@ -1,4 +1,4 @@
-import { mkdir, appendFile } from "node:fs/promises";
+import { mkdir, appendFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { homedir } from "node:os";
 
@@ -6,6 +6,8 @@ export type CaptureKind =
   | "chat.message"
   | "chat.params"
   | "chat.headers"
+  | "experimental.chat.messages.transform"
+  | "experimental.chat.system.transform"
   | "event"
   | "tool.execute.before"
   | "tool.execute.after";
@@ -22,6 +24,7 @@ export type CaptureRecord = {
 };
 
 export type CaptureStore = {
+  initialize?(): Promise<void>;
   append(record: CaptureRecord): Promise<void>;
   close?(): Promise<void>;
 };
@@ -67,6 +70,22 @@ function messageIDFrom(input: unknown): string | undefined {
   return optionalString(input.messageID) ?? optionalString(input.messageId);
 }
 
+function transformedMessages(output: unknown): Record<string, unknown>[] {
+  if (!isRecord(output) || !Array.isArray(output.messages)) return [];
+  return output.messages.filter((message) => isRecord(message));
+}
+
+function infoFromTransformedMessage(message: Record<string, unknown> | undefined): Record<string, unknown> | undefined {
+  return isRecord(message?.info) ? message.info : undefined;
+}
+
+function latestUserTransformedMessage(output: unknown): Record<string, unknown> | undefined {
+  return transformedMessages(output)
+    .slice()
+    .reverse()
+    .find((message) => optionalString(infoFromTransformedMessage(message)?.role) === "user");
+}
+
 function compactUndefined<T extends Record<string, unknown>>(value: T): T {
   for (const key of Object.keys(value)) {
     if (value[key] === undefined) delete value[key];
@@ -88,7 +107,7 @@ function captureRecord(input: {
 }
 
 export function defaultDataDir() {
-  return join(homedir(), ".local", "share", "opencode-insights");
+  return join(homedir(), ".opencode-insights");
 }
 
 export function resolveCapturePath(options: InsightsOptions = {}) {
@@ -100,7 +119,7 @@ export function resolveCapturePath(options: InsightsOptions = {}) {
     typeof options.dataDir === "string" && options.dataDir.length > 0
       ? options.dataDir
       : defaultDataDir();
-  return join(dataDir, "requests.sqlite");
+  return join(dataDir, "insights.sqlite");
 }
 
 export function normalizeChatMessageCapture(input: unknown, output: unknown, timestamp = Date.now()): CaptureRecord {
@@ -146,16 +165,44 @@ export function normalizeChatHeadersCapture(input: unknown, output: unknown, tim
   });
 }
 
+export function normalizeExperimentalChatMessagesTransformCapture(input: unknown, output: unknown, timestamp = Date.now()): CaptureRecord {
+  const latestUserMessage = latestUserTransformedMessage(output);
+  const info = infoFromTransformedMessage(latestUserMessage);
+  return captureRecord({
+    id: nextID(timestamp),
+    kind: "experimental.chat.messages.transform",
+    timestamp,
+    sessionID: sessionIDFrom(info),
+    messageID: messageIDFrom(info) ?? optionalString(info?.id),
+    payload: { input, output }
+  });
+}
+
+export function normalizeExperimentalChatSystemTransformCapture(input: unknown, output: unknown, timestamp = Date.now()): CaptureRecord {
+  const inputRecord = isRecord(input) ? input : {};
+  const model = isRecord(inputRecord.model) ? inputRecord.model : undefined;
+  return captureRecord({
+    id: nextID(timestamp),
+    kind: "experimental.chat.system.transform",
+    timestamp,
+    sessionID: sessionIDFrom(inputRecord),
+    providerID: model ? optionalString(model.providerID) : undefined,
+    modelID: model ? modelIDFrom(model) : undefined,
+    payload: { input, output }
+  });
+}
+
 export function normalizeEventCapture(event: unknown, timestamp = Date.now()): CaptureRecord {
   const record = isRecord(event) ? event : {};
   const properties = isRecord(record.properties) ? record.properties : {};
   const info = isRecord(properties.info) ? properties.info : {};
+  const part = isRecord(properties.part) ? properties.part : {};
   return captureRecord({
     id: nextID(timestamp),
     kind: "event",
     timestamp,
-    sessionID: sessionIDFrom(properties) ?? sessionIDFrom(info) ?? sessionIDFrom(record),
-    messageID: messageIDFrom(properties) ?? messageIDFrom(info),
+    sessionID: sessionIDFrom(properties) ?? sessionIDFrom(info) ?? sessionIDFrom(part) ?? sessionIDFrom(record),
+    messageID: messageIDFrom(properties) ?? messageIDFrom(info) ?? messageIDFrom(part),
     payload: { event }
   });
 }
@@ -179,6 +226,11 @@ export function normalizeToolCapture(
 export class JsonlCaptureStore implements CaptureStore {
   constructor(private readonly path: string) {}
 
+  async initialize() {
+    await mkdir(dirname(this.path), { recursive: true });
+    await writeFile(this.path, "", { flag: "a" });
+  }
+
   async append(record: CaptureRecord) {
     await mkdir(dirname(this.path), { recursive: true });
     await appendFile(this.path, `${JSON.stringify(record)}\n`, "utf8");
@@ -195,6 +247,14 @@ export class SqliteCaptureStore implements CaptureStore {
   private unavailable = false;
 
   constructor(private readonly path: string) {}
+
+  async initialize() {
+    const db = await this.database();
+    if (!db) {
+      const fallbackPath = this.path.endsWith(".sqlite") ? `${this.path}.jsonl` : this.path;
+      await new JsonlCaptureStore(fallbackPath).initialize();
+    }
+  }
 
   async append(record: CaptureRecord) {
     const db = await this.database();
@@ -238,18 +298,7 @@ export class SqliteCaptureStore implements CaptureStore {
         return undefined;
       }
       const db = new mod.Database(this.path);
-      db.run(`create table if not exists captures (
-        id text primary key,
-        kind text not null,
-        timestamp integer not null,
-        session_id text,
-        message_id text,
-        provider_id text,
-        model_id text,
-        payload_json text not null
-      )`);
-      db.run(`create index if not exists captures_timestamp_idx on captures(timestamp)`);
-      db.run(`create index if not exists captures_session_idx on captures(session_id)`);
+      initializeSchema(db);
       this.db = db;
       return db;
     } catch {
@@ -257,6 +306,21 @@ export class SqliteCaptureStore implements CaptureStore {
       return undefined;
     }
   }
+}
+
+function initializeSchema(db: BunSqliteDatabase) {
+  db.run(`create table if not exists captures (
+    id text primary key,
+    kind text not null,
+    timestamp integer not null,
+    session_id text,
+    message_id text,
+    provider_id text,
+    model_id text,
+    payload_json text not null
+  )`);
+  db.run(`create index if not exists captures_timestamp_idx on captures(timestamp)`);
+  db.run(`create index if not exists captures_session_idx on captures(session_id)`);
 }
 
 export function createCaptureStore(options: InsightsOptions = {}): CaptureStore {
