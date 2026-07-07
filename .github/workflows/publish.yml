@@ -1,0 +1,67 @@
+name: Publish to npm
+
+on:
+  push:
+    branches:
+      - main
+      - master
+    paths:
+      - package.json
+      - package-lock.json
+      - src/**
+      - README.md
+      - DEVELOPMENT.md
+      - LICENSE
+      - tsconfig.json
+      - tsup.config.ts
+      - vitest.config.ts
+      - test/**
+      - .github/workflows/publish.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Verify
+        run: npm run verify
+
+      - name: Check whether version is already published
+        id: published
+        shell: bash
+        run: |
+          package_name=$(node -p "require('./package.json').name")
+          package_version=$(node -p "require('./package.json').version")
+          published_version=$(npm view "${package_name}@${package_version}" version 2>/dev/null || true)
+
+          echo "package_name=${package_name}" >> "$GITHUB_OUTPUT"
+          echo "package_version=${package_version}" >> "$GITHUB_OUTPUT"
+
+          if [ "$published_version" = "$package_version" ]; then
+            echo "should_publish=false" >> "$GITHUB_OUTPUT"
+            echo "${package_name}@${package_version} is already published; skipping."
+          else
+            echo "should_publish=true" >> "$GITHUB_OUTPUT"
+            echo "${package_name}@${package_version} is not published yet; publishing."
+          fi
+
+      - name: Publish
+        if: steps.published.outputs.should_publish == 'true'
+        run: npm publish --access public --provenance

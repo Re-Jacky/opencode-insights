@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { execFile } from "node:child_process";
 import { existsSync, realpathSync } from "node:fs";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { homedir } from "node:os";
 import { pathToFileURL } from "node:url";
@@ -27,6 +27,7 @@ type CliOptions = {
   output?: string | undefined;
   configDir?: string | undefined;
   dryRun: boolean;
+  keepData: boolean;
 };
 
 async function main(argv: string[]) {
@@ -111,6 +112,11 @@ async function main(argv: string[]) {
     return;
   }
 
+  if (command === "uninstall") {
+    process.stdout.write(`${await uninstallOpenCode(options)}\n`);
+    return;
+  }
+
   {
     process.stderr.write(`Unknown command: ${command}\n`);
     process.stderr.write(`${usage()}\n`);
@@ -119,13 +125,15 @@ async function main(argv: string[]) {
 }
 
 export function parseOptions(args: string[]): CliOptions {
-  const options: CliOptions = { limit: DEFAULT_RECENT_LIMIT, limitProvided: false, json: false, dryRun: false };
+  const options: CliOptions = { limit: DEFAULT_RECENT_LIMIT, limitProvided: false, json: false, dryRun: false, keepData: false };
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index];
     if (arg === "--json") {
       options.json = true;
     } else if (arg === "--dry-run") {
       options.dryRun = true;
+    } else if (arg === "--keep-data") {
+      options.keepData = true;
     } else if (arg === "--db") {
       const value = args[index + 1];
       if (value) options.dbPath = value;
@@ -413,6 +421,72 @@ export function addUniquePlugin(config: JsonObject, plugin: string) {
   return true;
 }
 
+export function removePlugin(config: JsonObject, plugin: string) {
+  const current = Array.isArray(config.plugin) ? config.plugin : [];
+  const next = current.filter((entry) => !isPluginEntry(entry, plugin));
+  config.plugin = next;
+  return next.length !== current.length;
+}
+
+function isPluginEntry(entry: unknown, plugin: string) {
+  return entry === plugin || (Array.isArray(entry) && entry[0] === plugin);
+}
+
+export async function uninstallOpenCode(options: CliOptions) {
+  const configDir = options.configDir ?? defaultOpenCodeConfigDir();
+  const opencodePath = resolveOpenCodeConfigPath(configDir);
+  const tuiPath = join(configDir, "tui.json");
+  const dbPath = resolveCapturePath(options);
+  const jsonlPath = dbPath.endsWith(".sqlite") ? `${dbPath}.jsonl` : dbPath;
+
+  const lines = [
+    `OpenCode config: ${opencodePath}`,
+    `TUI config: ${tuiPath}`,
+    `DB path: ${dbPath}`,
+    `JSONL fallback path: ${jsonlPath}`
+  ];
+
+  const opencodeResult = await removePluginFromConfig(opencodePath, SERVER_PLUGIN_SPEC, options);
+  const tuiResult = await removePluginFromConfig(tuiPath, TUI_PLUGIN_SPEC, options);
+  lines.push(`Server plugin: ${opencodeResult}`);
+  lines.push(`TUI plugin: ${tuiResult}`);
+
+  if (options.keepData) {
+    lines.push("Data cleanup: skipped (--keep-data).");
+  } else {
+    const removed = await removeDataFiles([dbPath, jsonlPath], options);
+    lines.push(`Data cleanup: ${removed.length ? `removed ${removed.join(", ")}` : "no data files found"}`);
+  }
+
+  if (options.dryRun) {
+    lines.push("Dry run: no files changed.");
+  } else {
+    lines.push("Uninstall cleanup complete. Restart OpenCode to unload the plugin.");
+  }
+
+  return lines.join("\n");
+}
+
+async function removePluginFromConfig(path: string, plugin: string, options: CliOptions) {
+  if (!existsSync(path)) return "config not found";
+  const config = await readJsonConfig(path, { plugin: [] });
+  const changed = removePlugin(config, plugin);
+  if (!changed) return `not present (${plugin})`;
+  if (options.dryRun) return `would remove (${plugin})`;
+  await writeJsonConfig(path, config);
+  return `removed (${plugin})`;
+}
+
+async function removeDataFiles(paths: string[], options: CliOptions) {
+  const uniquePaths = [...new Set(paths)];
+  const existing = uniquePaths.filter((path) => existsSync(path));
+  if (options.dryRun) return existing;
+  for (const path of existing) {
+    await rm(path, { force: true });
+  }
+  return existing;
+}
+
 async function writeJsonConfig(path: string, config: JsonObject) {
   await mkdir(dirname(path), { recursive: true });
   await writeFile(path, `${JSON.stringify(config, null, 2)}\n`, "utf8");
@@ -422,6 +496,7 @@ function usage() {
   return [
     "Usage:",
     "  opencode-insights configure [--config-dir DIR] [--dry-run]",
+    "  opencode-insights uninstall [--config-dir DIR] [--db PATH] [--data-dir DIR] [--keep-data] [--dry-run]",
     "  opencode-insights recent [--db PATH] [--data-dir DIR] [--limit N] [--json]",
     "  opencode-insights sessions [--db PATH] [--data-dir DIR] [--limit N] [--json]",
     "  opencode-insights history [--db PATH] [--data-dir DIR] [--limit N]",

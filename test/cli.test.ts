@@ -4,8 +4,10 @@ import {
   configureOpenCode,
   formatSessionSummary,
   parseOptions,
+  removePlugin,
   stripJsonCommentsAndTrailingCommas,
-  summarizeSessions
+  summarizeSessions,
+  uninstallOpenCode
 } from "../src/cli.js";
 import type { HistorySession } from "../src/inspect.js";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
@@ -17,6 +19,7 @@ describe("cli helpers", () => {
     expect(parseOptions(["--db", "/tmp/insights.sqlite", "--limit", "100", "--json", "--port", "9999", "-o", "/tmp/out.json"])).toEqual({
       dbPath: "/tmp/insights.sqlite",
       dryRun: false,
+      keepData: false,
       limit: 100,
       limitProvided: true,
       json: true,
@@ -38,7 +41,17 @@ describe("cli helpers", () => {
   test("parses configure options", () => {
     expect(parseOptions(["--config-dir", "/tmp/opencode", "--dry-run"])).toMatchObject({
       configDir: "/tmp/opencode",
-      dryRun: true
+      dryRun: true,
+      keepData: false
+    });
+  });
+
+  test("parses uninstall options", () => {
+    expect(parseOptions(["--config-dir", "/tmp/opencode", "--data-dir", "/tmp/insights", "--keep-data", "--dry-run"])).toMatchObject({
+      configDir: "/tmp/opencode",
+      dataDir: "/tmp/insights",
+      dryRun: true,
+      keepData: true
     });
   });
 
@@ -55,6 +68,15 @@ describe("cli helpers", () => {
     expect(config.plugin).toEqual(["existing", "next"]);
   });
 
+  test("removes string and tuple plugin entries", () => {
+    const config: Record<string, unknown> = {
+      plugin: ["existing", "@rejacky/opencode-insights", ["@rejacky/opencode-insights", { dbPath: "/tmp/db.sqlite" }]]
+    };
+    expect(removePlugin(config, "@rejacky/opencode-insights")).toBe(true);
+    expect(config.plugin).toEqual(["existing"]);
+    expect(removePlugin(config, "@rejacky/opencode-insights")).toBe(false);
+  });
+
   test("configures opencode and tui plugin files", async () => {
     const dir = await mkdtemp(join(tmpdir(), "opencode-insights-test-"));
     try {
@@ -65,7 +87,8 @@ describe("cli helpers", () => {
         limit: 20,
         limitProvided: false,
         json: false,
-        dryRun: false
+        dryRun: false,
+        keepData: false
       });
 
       const opencode = JSON.parse(await readFile(join(dir, "opencode.jsonc"), "utf8")) as { plugin: string[] };
@@ -88,7 +111,8 @@ describe("cli helpers", () => {
         limit: 20,
         limitProvided: false,
         json: false,
-        dryRun: false
+        dryRun: false,
+        keepData: false
       });
 
       const tui = JSON.parse(await readFile(join(dir, "tui.json"), "utf8")) as { plugin: string[] };
@@ -97,6 +121,70 @@ describe("cli helpers", () => {
       expect(jsonc).toContain("existing-tui");
     } finally {
       await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("uninstalls plugin config entries and local data files", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "opencode-insights-test-"));
+    const dataDir = await mkdtemp(join(tmpdir(), "opencode-insights-data-"));
+    try {
+      await writeFile(
+        join(dir, "opencode.jsonc"),
+        JSON.stringify({ plugin: ["existing", ["@rejacky/opencode-insights", { dbPath: "/tmp/db.sqlite" }]] }),
+        "utf8"
+      );
+      await writeFile(join(dir, "tui.json"), JSON.stringify({ plugin: ["@rejacky/opencode-insights/tui", "other-tui"] }), "utf8");
+      await writeFile(join(dataDir, "insights.sqlite"), "sqlite", "utf8");
+      await writeFile(join(dataDir, "insights.sqlite.jsonl"), "jsonl", "utf8");
+
+      const output = await uninstallOpenCode({
+        configDir: dir,
+        dataDir,
+        limit: 20,
+        limitProvided: false,
+        json: false,
+        dryRun: false,
+        keepData: false
+      });
+
+      const opencode = JSON.parse(await readFile(join(dir, "opencode.jsonc"), "utf8")) as { plugin: string[] };
+      const tui = JSON.parse(await readFile(join(dir, "tui.json"), "utf8")) as { plugin: string[] };
+      expect(output).toContain("Uninstall cleanup complete");
+      expect(opencode.plugin).toEqual(["existing"]);
+      expect(tui.plugin).toEqual(["other-tui"]);
+      await expect(readFile(join(dataDir, "insights.sqlite"), "utf8")).rejects.toThrow();
+      await expect(readFile(join(dataDir, "insights.sqlite.jsonl"), "utf8")).rejects.toThrow();
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+      await rm(dataDir, { recursive: true, force: true });
+    }
+  });
+
+  test("uninstall dry run leaves files unchanged", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "opencode-insights-test-"));
+    const dataDir = await mkdtemp(join(tmpdir(), "opencode-insights-data-"));
+    try {
+      await writeFile(join(dir, "opencode.json"), JSON.stringify({ plugin: ["@rejacky/opencode-insights"] }), "utf8");
+      await writeFile(join(dir, "tui.json"), JSON.stringify({ plugin: ["@rejacky/opencode-insights/tui"] }), "utf8");
+      await writeFile(join(dataDir, "insights.sqlite"), "sqlite", "utf8");
+
+      const output = await uninstallOpenCode({
+        configDir: dir,
+        dataDir,
+        limit: 20,
+        limitProvided: false,
+        json: false,
+        dryRun: true,
+        keepData: false
+      });
+
+      expect(output).toContain("would remove");
+      expect(output).toContain("Dry run: no files changed");
+      expect(await readFile(join(dir, "opencode.json"), "utf8")).toContain("@rejacky/opencode-insights");
+      expect(await readFile(join(dataDir, "insights.sqlite"), "utf8")).toBe("sqlite");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+      await rm(dataDir, { recursive: true, force: true });
     }
   });
 

@@ -17,7 +17,7 @@ Install the packed plugin from your OpenCode config/package directory:
 
 ```bash
 cd ~/.config/opencode
-npm i /Users/zyao/Desktop/opencode-insights/rejacky-opencode-insights-0.1.0.tgz
+npm i /Users/zyao/Desktop/opencode-insights/rejacky-opencode-insights-*.tgz
 npx opencode-insights configure
 ```
 
@@ -65,27 +65,52 @@ npm test
 npm run build
 ```
 
-## Publish Checklist
+## Automated npm Publishing
 
-Before publishing:
+The repo publishes from GitHub Actions when `package.json` is pushed to `main` or `master` with a version that is not already on npm.
+
+One-time npm setup:
+
+1. Go to npm package settings for `@rejacky/opencode-insights`.
+2. Open the package publishing / trusted publishing settings.
+3. Add a trusted publisher for this GitHub repository.
+4. Use workflow file `.github/workflows/publish.yml`.
+5. Keep the package public.
+
+No `NPM_TOKEN` secret is needed when npm trusted publishing is configured. The workflow uses GitHub OIDC plus `npm publish --provenance`.
+
+Release flow:
+
+```bash
+git status
+npm version patch
+git push --follow-tags
+```
+
+Use `npm version minor` or `npm version major` for larger releases. The workflow will run verification first, skip publishing if that exact version already exists, and publish only unpublished versions.
+
+Manual fallback:
 
 ```bash
 npm run verify
 npm pack --dry-run
+npm publish --access public --provenance
 ```
+
+## Manual Publish Checklist
 
 Review package contents:
 
 ```bash
 npm pack
-tar -tf rejacky-opencode-insights-0.1.0.tgz
+tar -tf rejacky-opencode-insights-0.1.1.tgz
 ```
 
-Publish:
+Publish manually if GitHub Actions is unavailable:
 
 ```bash
 npm login
-npm publish --access public
+npm publish --access public --provenance
 ```
 
 After publishing, users should be able to install from their OpenCode config/package directory with:

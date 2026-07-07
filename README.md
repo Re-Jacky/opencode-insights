@@ -48,6 +48,39 @@ Use a custom OpenCode config directory:
 npx opencode-insights configure --config-dir ~/.config/opencode
 ```
 
+## Uninstall
+
+Remove this plugin from `opencode.json` / `opencode.jsonc`, remove it from `tui.json`, and delete the local Insights database files:
+
+```bash
+npx opencode-insights uninstall
+```
+
+Preview the cleanup without changing files:
+
+```bash
+npx opencode-insights uninstall --dry-run
+```
+
+Keep captured data while removing only the plugin config entries:
+
+```bash
+npx opencode-insights uninstall --keep-data
+```
+
+Use a custom OpenCode config directory or data location:
+
+```bash
+npx opencode-insights uninstall --config-dir ~/.config/opencode --data-dir ~/.opencode-insights
+```
+
+After uninstalling, restart OpenCode. If you also want to remove the npm package from your OpenCode config/package directory, run:
+
+```bash
+cd ~/.config/opencode
+npm rm @rejacky/opencode-insights
+```
+
 ## What You Get
 
 - Live TPS, average TPS, and average TTFT in the OpenCode prompt zone.
@@ -118,6 +151,12 @@ Compact the local SQLite DB after heavy testing:
 
 ```bash
 npx opencode-insights vacuum
+```
+
+Remove plugin config entries and delete local captured data:
+
+```bash
+npx opencode-insights uninstall
 ```
 
 If the command is not available through `npx`, run the installed binary directly from your OpenCode config directory:
