@@ -10,7 +10,7 @@ import {
   uninstallOpenCode
 } from "../src/cli.js";
 import type { HistorySession } from "../src/inspect.js";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
@@ -147,7 +147,12 @@ describe("cli helpers", () => {
 
   test("debug command points opencode and tui configs at local build output", async () => {
     const dir = await mkdtemp(join(tmpdir(), "opencode-insights-test-"));
+    const projectDir = await mkdtemp(join(tmpdir(), "opencode-insights-project-"));
+    const originalCwd = process.cwd();
     try {
+      await mkdir(join(projectDir, "dist"), { recursive: true });
+      await writeFile(join(projectDir, "dist", "index.js"), "", "utf8");
+      await writeFile(join(projectDir, "dist", "tui.js"), "", "utf8");
       await writeFile(
         join(dir, "opencode.jsonc"),
         JSON.stringify({ plugin: ["existing", "@rejacky/opencode-insights"] }),
@@ -159,6 +164,7 @@ describe("cli helpers", () => {
         "utf8"
       );
 
+      process.chdir(projectDir);
       const output = await configureOpenCodeDebug({
         configDir: dir,
         limit: 20,
@@ -177,7 +183,9 @@ describe("cli helpers", () => {
       expect(opencode.plugin).toEqual(["existing", localServerEntry]);
       expect(tui.plugin).toEqual(["other-tui", localTuiEntry]);
     } finally {
+      process.chdir(originalCwd);
       await rm(dir, { recursive: true, force: true });
+      await rm(projectDir, { recursive: true, force: true });
     }
   });
 
