@@ -1,7 +1,6 @@
 import { describe, expect, test } from "vitest";
 import {
   addUniquePlugin,
-  configureOpenCode,
   configureOpenCodeDebug,
   formatSessionSummary,
   parseOptions,
@@ -39,7 +38,7 @@ describe("cli helpers", () => {
     });
   });
 
-  test("parses configure options", () => {
+  test("parses config directory dry-run options", () => {
     expect(parseOptions(["--config-dir", "/tmp/opencode", "--dry-run"])).toMatchObject({
       configDir: "/tmp/opencode",
       dryRun: true,
@@ -76,53 +75,6 @@ describe("cli helpers", () => {
     expect(removePlugin(config, "@rejacky/opencode-insights")).toBe(true);
     expect(config.plugin).toEqual(["existing"]);
     expect(removePlugin(config, "@rejacky/opencode-insights")).toBe(false);
-  });
-
-  test("configures opencode and tui plugin files", async () => {
-    const dir = await mkdtemp(join(tmpdir(), "opencode-insights-test-"));
-    try {
-      await writeFile(join(dir, "opencode.jsonc"), '{\n  // existing settings\n  "plugin": ["existing"],\n}\n', "utf8");
-
-      const output = await configureOpenCode({
-        configDir: dir,
-        limit: 20,
-        limitProvided: false,
-        json: false,
-        dryRun: false,
-        keepData: false
-      });
-
-      const opencode = JSON.parse(await readFile(join(dir, "opencode.jsonc"), "utf8")) as { plugin: string[] };
-      const tui = JSON.parse(await readFile(join(dir, "tui.json"), "utf8")) as { plugin: string[] };
-      expect(output).toContain("Configuration written");
-      expect(opencode.plugin).toEqual(["existing", "@rejacky/opencode-insights"]);
-      expect(tui.plugin).toEqual(["@rejacky/opencode-insights"]);
-    } finally {
-      await rm(dir, { recursive: true, force: true });
-    }
-  });
-
-  test("uses tui json because OpenCode does not load tui jsonc", async () => {
-    const dir = await mkdtemp(join(tmpdir(), "opencode-insights-test-"));
-    try {
-      await writeFile(join(dir, "tui.jsonc"), '{\n  // keep comments parseable\n  "plugin": ["existing-tui"],\n}\n', "utf8");
-
-      await configureOpenCode({
-        configDir: dir,
-        limit: 20,
-        limitProvided: false,
-        json: false,
-        dryRun: false,
-        keepData: false
-      });
-
-      const tui = JSON.parse(await readFile(join(dir, "tui.json"), "utf8")) as { plugin: string[] };
-      const jsonc = await readFile(join(dir, "tui.jsonc"), "utf8");
-      expect(tui.plugin).toEqual(["@rejacky/opencode-insights"]);
-      expect(jsonc).toContain("existing-tui");
-    } finally {
-      await rm(dir, { recursive: true, force: true });
-    }
   });
 
   test("uninstalls plugin config entries and local data files", async () => {
@@ -190,28 +142,6 @@ describe("cli helpers", () => {
     } finally {
       await rm(dir, { recursive: true, force: true });
       await rm(dataDir, { recursive: true, force: true });
-    }
-  });
-
-  test("migrates subpath tui entry back to root package spec", async () => {
-    const dir = await mkdtemp(join(tmpdir(), "opencode-insights-test-"));
-    try {
-      await writeFile(join(dir, "tui.json"), JSON.stringify({ plugin: ["existing-tui", "@rejacky/opencode-insights/tui"] }), "utf8");
-
-      const output = await configureOpenCode({
-        configDir: dir,
-        limit: 20,
-        limitProvided: false,
-        json: false,
-        dryRun: false,
-        keepData: false
-      });
-
-      const tui = JSON.parse(await readFile(join(dir, "tui.json"), "utf8")) as { plugin: string[] };
-      expect(output).toContain("removed subpath entry");
-      expect(tui.plugin).toEqual(["existing-tui", "@rejacky/opencode-insights"]);
-    } finally {
-      await rm(dir, { recursive: true, force: true });
     }
   });
 

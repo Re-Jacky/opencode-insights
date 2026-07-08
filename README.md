@@ -4,49 +4,13 @@ Local OpenCode observability for live TPS, subagent status, and full-fidelity re
 
 ## Install
 
-Install from your OpenCode config/package directory:
+Install globally with OpenCode's plugin manager:
 
 ```bash
-cd ~/.config/opencode
-npm i @rejacky/opencode-insights
-npx opencode-insights configure
+opencode plugin @rejacky/opencode-insights --global
 ```
 
-Restart OpenCode after configuring the plugin.
-
-`opencode-insights configure` updates two config files because OpenCode loads server plugins and TUI plugins separately:
-
-```json
-// ~/.config/opencode/opencode.json or opencode.jsonc
-{
-  "plugin": ["@rejacky/opencode-insights"]
-}
-```
-
-```json
-// ~/.config/opencode/tui.json
-{
-  "plugin": ["@rejacky/opencode-insights"]
-}
-```
-
-Preview config changes without writing files:
-
-```bash
-npx opencode-insights configure --dry-run
-```
-
-OpenCode 1.17.14 loads `tui.json` for TUI plugins. It does not load `tui.jsonc`, so `configure` always writes the TUI plugin entry to `tui.json`.
-
-The TUI plugin value is the package name `@rejacky/opencode-insights`, not an absolute `dist/tui.js` path.
-
-OpenCode resolves TUI plugin entries through module resolution, so this works after installing the package in your OpenCode config/package directory.
-
-Use a custom OpenCode config directory:
-
-```bash
-npx opencode-insights configure --config-dir ~/.config/opencode
-```
+Restart OpenCode after installing the plugin.
 
 ## Uninstall
 

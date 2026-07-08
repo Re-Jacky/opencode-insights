@@ -108,11 +108,6 @@ async function main(argv: string[]) {
     return;
   }
 
-  if (command === "configure") {
-    process.stdout.write(`${await configureOpenCode(options)}\n`);
-    return;
-  }
-
   if (command === "debug") {
     process.stdout.write(`${await configureOpenCodeDebug(options)}\n`);
     return;
@@ -314,38 +309,6 @@ async function vacuumDatabase(options: CliOptions) {
 }
 
 type JsonObject = Record<string, unknown>;
-
-export async function configureOpenCode(options: CliOptions) {
-  const configDir = options.configDir ?? defaultOpenCodeConfigDir();
-  const opencodePath = resolveOpenCodeConfigPath(configDir);
-  const tuiPath = join(configDir, "tui.json");
-
-  const opencodeConfig = await readJsonConfig(opencodePath, { plugin: [] });
-  const tuiConfig = await readJsonConfig(tuiPath, { plugin: [] });
-  const opencodeChanged = addUniquePlugin(opencodeConfig, SERVER_PLUGIN_SPEC);
-  const removedSubpathTui = removePlugin(tuiConfig, SUBPATH_TUI_PLUGIN_SPEC);
-  const tuiAdded = addUniquePlugin(tuiConfig, TUI_PLUGIN_SPEC);
-  const tuiChanged = removedSubpathTui || tuiAdded;
-
-  const lines = [
-    `OpenCode config: ${opencodePath}`,
-    `TUI config: ${tuiPath}`,
-    `Server plugin: ${opencodeChanged ? "added" : "already present"} (${SERVER_PLUGIN_SPEC})`,
-    `TUI plugin: ${tuiAdded ? "added" : "already present"} (${TUI_PLUGIN_SPEC})`
-  ];
-  if (removedSubpathTui) lines.push(`TUI plugin: removed subpath entry (${SUBPATH_TUI_PLUGIN_SPEC})`);
-
-  if (options.dryRun) {
-    lines.push("Dry run: no files written.");
-    return lines.join("\n");
-  }
-
-  await mkdir(configDir, { recursive: true });
-  if (opencodeChanged || !existsSync(opencodePath)) await writeJsonConfig(opencodePath, opencodeConfig);
-  if (tuiChanged || !existsSync(tuiPath)) await writeJsonConfig(tuiPath, tuiConfig);
-  lines.push("Configuration written. Restart OpenCode to load the plugin.");
-  return lines.join("\n");
-}
 
 export async function configureOpenCodeDebug(options: CliOptions) {
   const configDir = options.configDir ?? defaultOpenCodeConfigDir();
@@ -559,7 +522,6 @@ async function writeJsonConfig(path: string, config: JsonObject) {
 function usage() {
   return [
     "Usage:",
-    "  opencode-insights configure [--config-dir DIR] [--dry-run]",
     "  opencode-insights debug [--config-dir DIR] [--dry-run]",
     "  opencode-insights uninstall [--config-dir DIR] [--db PATH] [--data-dir DIR] [--keep-data] [--dry-run]",
     "  opencode-insights recent [--db PATH] [--data-dir DIR] [--limit N] [--json]",
