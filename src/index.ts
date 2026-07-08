@@ -1,4 +1,5 @@
-import type { Plugin, PluginModule } from "@opencode-ai/plugin";
+import type { Plugin } from "@opencode-ai/plugin";
+import type { TuiPlugin } from "@opencode-ai/plugin/tui";
 import {
   createCaptureStore,
   normalizeChatHeadersCapture,
@@ -60,8 +61,13 @@ export const OpenCodeInsights: Plugin = async (_input, options?: InsightsOptions
 };
 
 export const server = OpenCodeInsights;
+const rootTui: TuiPlugin = async (...args) => {
+  const mod = await import("./tui.js");
+  return mod.tui(...args);
+};
 export const id = "opencode-insights";
-export default { id, server } satisfies PluginModule;
+export { rootTui as tui };
+export default { id, server, tui: rootTui };
 export * from "./capture.js";
 export * from "./metrics.js";
 export * from "./subagents.js";

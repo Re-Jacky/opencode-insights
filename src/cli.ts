@@ -2,7 +2,7 @@
 import { execFile } from "node:child_process";
 import { existsSync, realpathSync } from "node:fs";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { homedir } from "node:os";
 import { pathToFileURL } from "node:url";
 import { promisify } from "node:util";
@@ -14,7 +14,8 @@ const execFileAsync = promisify(execFile);
 const DEFAULT_RECENT_LIMIT = 20;
 const DEFAULT_HISTORY_LIMIT = 5_000;
 const SERVER_PLUGIN_SPEC = "@rejacky/opencode-insights";
-const TUI_PLUGIN_SPEC = "@rejacky/opencode-insights";
+const TUI_PLUGIN_SPEC = SERVER_PLUGIN_SPEC;
+const SUBPATH_TUI_PLUGIN_SPEC = "@rejacky/opencode-insights/tui";
 
 type CliOptions = {
   dbPath?: string | undefined;
@@ -109,6 +110,11 @@ async function main(argv: string[]) {
 
   if (command === "configure") {
     process.stdout.write(`${await configureOpenCode(options)}\n`);
+    return;
+  }
+
+  if (command === "debug") {
+    process.stdout.write(`${await configureOpenCodeDebug(options)}\n`);
     return;
   }
 
@@ -317,14 +323,17 @@ export async function configureOpenCode(options: CliOptions) {
   const opencodeConfig = await readJsonConfig(opencodePath, { plugin: [] });
   const tuiConfig = await readJsonConfig(tuiPath, { plugin: [] });
   const opencodeChanged = addUniquePlugin(opencodeConfig, SERVER_PLUGIN_SPEC);
-  const tuiChanged = addUniquePlugin(tuiConfig, TUI_PLUGIN_SPEC);
+  const removedSubpathTui = removePlugin(tuiConfig, SUBPATH_TUI_PLUGIN_SPEC);
+  const tuiAdded = addUniquePlugin(tuiConfig, TUI_PLUGIN_SPEC);
+  const tuiChanged = removedSubpathTui || tuiAdded;
 
   const lines = [
     `OpenCode config: ${opencodePath}`,
     `TUI config: ${tuiPath}`,
     `Server plugin: ${opencodeChanged ? "added" : "already present"} (${SERVER_PLUGIN_SPEC})`,
-    `TUI plugin: ${tuiChanged ? "added" : "already present"} (${TUI_PLUGIN_SPEC})`
+    `TUI plugin: ${tuiAdded ? "added" : "already present"} (${TUI_PLUGIN_SPEC})`
   ];
+  if (removedSubpathTui) lines.push(`TUI plugin: removed subpath entry (${SUBPATH_TUI_PLUGIN_SPEC})`);
 
   if (options.dryRun) {
     lines.push("Dry run: no files written.");
@@ -335,6 +344,44 @@ export async function configureOpenCode(options: CliOptions) {
   if (opencodeChanged || !existsSync(opencodePath)) await writeJsonConfig(opencodePath, opencodeConfig);
   if (tuiChanged || !existsSync(tuiPath)) await writeJsonConfig(tuiPath, tuiConfig);
   lines.push("Configuration written. Restart OpenCode to load the plugin.");
+  return lines.join("\n");
+}
+
+export async function configureOpenCodeDebug(options: CliOptions) {
+  const configDir = options.configDir ?? defaultOpenCodeConfigDir();
+  const opencodePath = resolveOpenCodeConfigPath(configDir);
+  const tuiPath = join(configDir, "tui.json");
+  const localServerEntry = resolve("dist/index.js");
+  const localTuiEntry = resolve("dist/tui.js");
+
+  if (!existsSync(localServerEntry) || !existsSync(localTuiEntry)) {
+    throw new Error("Missing dist output. Run npm run build before opencode-insights debug.");
+  }
+
+  const opencodeConfig = await readJsonConfig(opencodePath, { plugin: [] });
+  const tuiConfig = await readJsonConfig(tuiPath, { plugin: [] });
+  setSinglePluginSpec(opencodeConfig, SERVER_PLUGIN_SPEC, localServerEntry);
+  setSinglePluginSpec(tuiConfig, TUI_PLUGIN_SPEC, localTuiEntry);
+  removePlugin(tuiConfig, SUBPATH_TUI_PLUGIN_SPEC);
+
+  const lines = [
+    `OpenCode config: ${opencodePath}`,
+    `TUI config: ${tuiPath}`,
+    `Local server plugin: ${localServerEntry}`,
+    `Local TUI plugin: ${localTuiEntry}`,
+    `Server plugin: set local build output`,
+    `TUI plugin: set local build output`
+  ];
+
+  if (options.dryRun) {
+    lines.push("Dry run: no files written.");
+    return lines.join("\n");
+  }
+
+  await mkdir(configDir, { recursive: true });
+  await writeJsonConfig(opencodePath, opencodeConfig);
+  await writeJsonConfig(tuiPath, tuiConfig);
+  lines.push("Debug configuration written. Restart OpenCode to load the local build.");
   return lines.join("\n");
 }
 
@@ -432,6 +479,21 @@ function isPluginEntry(entry: unknown, plugin: string) {
   return entry === plugin || (Array.isArray(entry) && entry[0] === plugin);
 }
 
+function setSinglePluginSpec(config: JsonObject, previousPlugin: string, nextPlugin: string) {
+  const current = Array.isArray(config.plugin) ? config.plugin : [];
+  const next = current.filter((entry) => !isInsightsPluginEntry(entry, previousPlugin, nextPlugin));
+  config.plugin = [...next, nextPlugin];
+}
+
+function isInsightsPluginEntry(entry: unknown, packagePlugin: string, localPlugin: string) {
+  if (isPluginEntry(entry, packagePlugin) || isPluginEntry(entry, localPlugin) || isPluginEntry(entry, SUBPATH_TUI_PLUGIN_SPEC)) {
+    return true;
+  }
+  const spec = Array.isArray(entry) ? entry[0] : entry;
+  if (typeof spec !== "string") return false;
+  return /(?:^|[/@-])opencode-insights.*\.tgz$/u.test(spec) || /\/opencode-insights\/dist\/(?:index|tui)\.js$/u.test(spec);
+}
+
 export async function uninstallOpenCode(options: CliOptions) {
   const configDir = options.configDir ?? defaultOpenCodeConfigDir();
   const opencodePath = resolveOpenCodeConfigPath(configDir);
@@ -448,8 +510,10 @@ export async function uninstallOpenCode(options: CliOptions) {
 
   const opencodeResult = await removePluginFromConfig(opencodePath, SERVER_PLUGIN_SPEC, options);
   const tuiResult = await removePluginFromConfig(tuiPath, TUI_PLUGIN_SPEC, options);
+  const subpathTuiResult = await removePluginFromConfig(tuiPath, SUBPATH_TUI_PLUGIN_SPEC, options);
   lines.push(`Server plugin: ${opencodeResult}`);
   lines.push(`TUI plugin: ${tuiResult}`);
+  lines.push(`Subpath TUI plugin: ${subpathTuiResult}`);
 
   if (options.keepData) {
     lines.push("Data cleanup: skipped (--keep-data).");
@@ -496,6 +560,7 @@ function usage() {
   return [
     "Usage:",
     "  opencode-insights configure [--config-dir DIR] [--dry-run]",
+    "  opencode-insights debug [--config-dir DIR] [--dry-run]",
     "  opencode-insights uninstall [--config-dir DIR] [--db PATH] [--data-dir DIR] [--keep-data] [--dry-run]",
     "  opencode-insights recent [--db PATH] [--data-dir DIR] [--limit N] [--json]",
     "  opencode-insights sessions [--db PATH] [--data-dir DIR] [--limit N] [--json]",

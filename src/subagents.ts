@@ -246,16 +246,15 @@ function extractSubagent(event: unknown): SubagentInfo | undefined {
   const completedMs = numberFromPath(info.time, "completed");
   const explicitUpdatedMs = numberFromPath(info.time, "updated");
   const updatedMs = completedMs ?? explicitUpdatedMs ?? startedMs;
-  const infoStatus = asString(info.status);
-  const hasError = info.error !== undefined || infoStatus === "error";
+  const hasError = info.error !== undefined || asString(info.status) === "error";
   const status: SubagentStatus =
     hasError
       ? "error"
-      : typeof completedMs === "number" || infoStatus === "idle"
+      : typeof completedMs === "number"
         ? "done"
         : "running";
   const terminalMs =
-    typeof completedMs === "number" || infoStatus === "idle"
+    typeof completedMs === "number"
       ? updatedMs
       : status === "error" && typeof explicitUpdatedMs === "number"
         ? explicitUpdatedMs
@@ -285,11 +284,8 @@ function updateExistingSubagent(state: SubagentState, event: unknown): SubagentI
   if (!previous) return undefined;
 
   const info = isRecord(evt.properties?.info) ? evt.properties.info : undefined;
-  const completedMs = numberFromPath(info?.time, "completed");
-  const messageCompleted = evt.type === "message.updated" && asString(info?.role) === "assistant" && typeof completedMs === "number";
-  const messageFailed = messageCompleted && info?.error !== undefined;
-  const status = messageFailed ? "error" : messageCompleted ? "done" : statusFromEvent(event) ?? previous.status;
-  const timestamp = messageCompleted ? new Date(completedMs).toISOString() : new Date().toISOString();
+  const status = statusFromEvent(event) ?? previous.status;
+  const timestamp = new Date().toISOString();
   const done = status === "done" || status === "error";
   return {
     ...previous,
@@ -304,11 +300,9 @@ function statusFromEvent(event: unknown): SubagentStatus | undefined {
   if (!isRecord(event)) return undefined;
   const evt = event as EventLike;
   if (evt.type === "session.error") return "error";
-  if (evt.type === "session.idle") return "done";
   if (evt.type === "session.status" && isRecord(evt.properties?.status)) {
     const statusType = asString(evt.properties.status.type);
     if (statusType === "busy" || statusType === "running") return "running";
-    if (statusType === "idle") return "done";
     if (statusType === "error") return "error";
   }
   return undefined;

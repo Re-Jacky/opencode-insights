@@ -2,6 +2,7 @@ import { describe, expect, test } from "vitest";
 import {
   addUniquePlugin,
   configureOpenCode,
+  configureOpenCodeDebug,
   formatSessionSummary,
   parseOptions,
   removePlugin,
@@ -12,7 +13,7 @@ import {
 import type { HistorySession } from "../src/inspect.js";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 
 describe("cli helpers", () => {
   test("parses common command options", () => {
@@ -133,7 +134,11 @@ describe("cli helpers", () => {
         JSON.stringify({ plugin: ["existing", ["@rejacky/opencode-insights", { dbPath: "/tmp/db.sqlite" }]] }),
         "utf8"
       );
-      await writeFile(join(dir, "tui.json"), JSON.stringify({ plugin: ["@rejacky/opencode-insights", "other-tui"] }), "utf8");
+      await writeFile(
+        join(dir, "tui.json"),
+        JSON.stringify({ plugin: ["@rejacky/opencode-insights", "@rejacky/opencode-insights/tui", "other-tui"] }),
+        "utf8"
+      );
       await writeFile(join(dataDir, "insights.sqlite"), "sqlite", "utf8");
       await writeFile(join(dataDir, "insights.sqlite.jsonl"), "jsonl", "utf8");
 
@@ -187,6 +192,65 @@ describe("cli helpers", () => {
       await rm(dataDir, { recursive: true, force: true });
     }
   });
+
+  test("migrates subpath tui entry back to root package spec", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "opencode-insights-test-"));
+    try {
+      await writeFile(join(dir, "tui.json"), JSON.stringify({ plugin: ["existing-tui", "@rejacky/opencode-insights/tui"] }), "utf8");
+
+      const output = await configureOpenCode({
+        configDir: dir,
+        limit: 20,
+        limitProvided: false,
+        json: false,
+        dryRun: false,
+        keepData: false
+      });
+
+      const tui = JSON.parse(await readFile(join(dir, "tui.json"), "utf8")) as { plugin: string[] };
+      expect(output).toContain("removed subpath entry");
+      expect(tui.plugin).toEqual(["existing-tui", "@rejacky/opencode-insights"]);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("debug command points opencode and tui configs at local build output", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "opencode-insights-test-"));
+    try {
+      await writeFile(
+        join(dir, "opencode.jsonc"),
+        JSON.stringify({ plugin: ["existing", "@rejacky/opencode-insights"] }),
+        "utf8"
+      );
+      await writeFile(
+        join(dir, "tui.json"),
+        JSON.stringify({ plugin: ["@rejacky/opencode-insights/tui", "other-tui"] }),
+        "utf8"
+      );
+
+      const output = await configureOpenCodeDebug({
+        configDir: dir,
+        limit: 20,
+        limitProvided: false,
+        json: false,
+        dryRun: false,
+        keepData: false
+      });
+
+      const localServerEntry = resolve("dist/index.js");
+      const localTuiEntry = resolve("dist/tui.js");
+      const opencode = JSON.parse(await readFile(join(dir, "opencode.jsonc"), "utf8")) as { plugin: string[] };
+      const tui = JSON.parse(await readFile(join(dir, "tui.json"), "utf8")) as { plugin: string[] };
+      expect(output).toContain(localServerEntry);
+      expect(output).toContain(localTuiEntry);
+      expect(opencode.plugin).toEqual(["existing", localServerEntry]);
+      expect(tui.plugin).toEqual(["other-tui", localTuiEntry]);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
 
   test("summarizes reconstructed sessions for terminal output", () => {
     const rows = summarizeSessions([

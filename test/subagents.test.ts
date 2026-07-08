@@ -108,7 +108,7 @@ describe("subagent status", () => {
     );
   });
 
-  test("updates existing subagents from session status and terminal events", () => {
+  test("keeps existing subagents running through idle status until terminal events", () => {
     const state = createSubagentState();
 
     applySubagentEvent(state, {
@@ -141,7 +141,13 @@ describe("subagent status", () => {
       }
     });
 
-    expect(renderSubagentFooter(state, "ses_parent", { now: 5_000 })).toBe("Subagents 0 running · 1 done · 0 error");
+    expect(renderSubagentFooter(state, "ses_parent", { now: 5_000 })).toBe(
+      "Subagents 1 running · 0 done · 0 error"
+    );
+    expect(getSubagentSidebarModel(state, "ses_parent", { now: 5_000 })?.rows[0]).toMatchObject({
+      status: "running",
+      subtitle: "00:04"
+    });
 
     applySubagentEvent(state, {
       type: "session.error",
@@ -155,7 +161,7 @@ describe("subagent status", () => {
     );
   });
 
-  test("marks child subagent done from completed assistant message update", () => {
+  test("keeps child subagent running after completed assistant message update", () => {
     const state = createSubagentState();
 
     applySubagentEvent(state, {
@@ -191,13 +197,13 @@ describe("subagent status", () => {
 
     expect(getSubagentSidebarModel(state, "ses_parent", { now: 5_000 })).toEqual({
       title: "Subagents",
-      summary: "0 running · 1 done · 0 error",
+      summary: "1 running · 0 done · 0 error",
       rows: [
         {
           id: "ses_child_1",
           title: "Say hi (@general subagent)",
-          subtitle: "00:03 · ctx 33,492 tokens",
-          status: "done"
+          subtitle: "00:04 · ctx 33,492 tokens",
+          status: "running"
         }
       ]
     });
@@ -302,7 +308,7 @@ describe("subagent status", () => {
     expect(renderSubagentFooter(state, "ses_other_parent")).toBe("");
   });
 
-  test("marks session.updated idle payloads as completed", () => {
+  test("keeps session.updated idle payloads running", () => {
     const state = createSubagentState();
 
     applySubagentEvent(state, {
@@ -319,10 +325,10 @@ describe("subagent status", () => {
     });
 
     expect(renderSubagentFooter(state, "ses_parent", { now: 5_000 })).toBe(
-      "Subagents 0 running · 1 done · 0 error"
+      "Subagents 1 running · 0 done · 0 error"
     );
     expect(renderSubagentSidebar(state, "ses_parent", { now: 5_000 })).toBe(
-      ["Subagents", "0 running · 1 done · 0 error", "Review tests", "00:03"].join("\n")
+      ["Subagents", "1 running · 0 done · 0 error", "Review tests", "00:04"].join("\n")
     );
   });
 

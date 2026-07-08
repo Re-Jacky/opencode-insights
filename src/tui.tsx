@@ -1,7 +1,7 @@
 /** @jsxImportSource @opentui/solid */
 import { createTextAttributes, StyledText, type TextChunk, type TextRenderable } from "@opentui/core";
 import type { TuiPlugin, TuiPluginApi, TuiPluginModule } from "@opencode-ai/plugin/tui";
-import { onCleanup } from "solid-js";
+import { createSignal, onCleanup } from "solid-js";
 import {
   createMetricsState,
   recordAssistantDelta,
@@ -33,7 +33,10 @@ function PromptRight(props: {
 
   const sync = () => {
     if (!text) return;
-    text.content = props.text();
+    const content = props.text();
+    text.content = content;
+    text.visible = content.length > 0;
+    text.height = content.length > 0 ? "auto" : 0;
     props.api.renderer.requestRender();
   };
 
@@ -89,11 +92,20 @@ function SubagentSidebar(props: {
   subscribe: (listener: Listener) => () => void;
 }) {
   let text: TextRenderable | undefined;
+  const [collapsed, setCollapsed] = createSignal(false);
   const titleAttributes = createTextAttributes({ bold: true });
+
+  const toggle = () => {
+    setCollapsed((prev) => !prev);
+    props.api.renderer.requestRender();
+  };
 
   const sync = () => {
     if (!text) return;
-    text.content = renderSubagentStyledSidebar(props.state, props.sessionID, props.api, titleAttributes);
+    const model = getSubagentSidebarModel(props.state, props.sessionID);
+    text.visible = !!model;
+    text.height = model ? "auto" : 0;
+    text.content = model ? renderSubagentStyledSidebar(props.state, props.sessionID, props.api, titleAttributes, collapsed()) : "";
     props.api.renderer.requestRender();
   };
 
@@ -110,6 +122,7 @@ function SubagentSidebar(props: {
         text = ref;
         sync();
       }}
+      onMouseDown={toggle}
       fg={props.api.theme.current.textMuted}
     >
       {""}
@@ -121,20 +134,30 @@ function renderSubagentStyledSidebar(
   state: SubagentState,
   sessionID: string,
   api: TuiPluginApi,
-  titleAttributes: number
+  titleAttributes: number,
+  collapsed: boolean
 ) {
   const model = getSubagentSidebarModel(state, sessionID);
   if (!model) return "";
 
+  const indicator = collapsed ? "▶ " : "▼ ";
   const chunks: TextChunk[] = [
-    textChunk(`${model.title}\n`, api.theme.current.text, titleAttributes),
+    textChunk(`${indicator}${model.title}\n`, api.theme.current.text, titleAttributes),
     textChunk(`${model.summary}\n`, api.theme.current.textMuted)
   ];
 
-  for (const [index, row] of model.rows.entries()) {
-    if (index > 0) chunks.push(textChunk("\n", api.theme.current.textMuted));
-    chunks.push(textChunk(`${row.title}\n`, api.theme.current.text));
-    chunks.push(textChunk(row.subtitle, api.theme.current.textMuted));
+  if (!collapsed) {
+    for (const [index, row] of model.rows.entries()) {
+      if (index > 0) chunks.push(textChunk("\n"));
+      const dotColor = row.status === "running"
+        ? api.theme.current.success
+        : row.status === "error"
+          ? api.theme.current.error
+          : api.theme.current.textMuted;
+      chunks.push(textChunk("• ", dotColor));
+      chunks.push(textChunk(`${row.title}\n`, api.theme.current.text));
+      chunks.push(textChunk(row.subtitle, api.theme.current.textMuted));
+    }
   }
 
   return new StyledText(chunks);
