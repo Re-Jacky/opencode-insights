@@ -13,7 +13,6 @@ import {
   applySubagentEvent,
   createSubagentState,
   getSubagentSidebarModel,
-  renderSubagentFooter,
   type SubagentState
 } from "./subagents.js";
 
@@ -37,35 +36,6 @@ function PromptRight(props: {
     text.content = content;
     text.visible = content.length > 0;
     text.height = content.length > 0 ? "auto" : 0;
-    props.api.renderer.requestRender();
-  };
-
-  const unsubscribe = props.subscribe(sync);
-  onCleanup(unsubscribe);
-
-  return (
-    <text
-      ref={(ref: TextRenderable) => {
-        text = ref;
-        sync();
-      }}
-      fg={props.api.theme.current.textMuted}
-    >
-      {props.text()}
-    </text>
-  );
-}
-
-function ReactiveText(props: {
-  api: TuiPluginApi;
-  text: () => string;
-  subscribe: (listener: Listener) => () => void;
-}) {
-  let text: TextRenderable | undefined;
-
-  const sync = () => {
-    if (!text) return;
-    text.content = props.text();
     props.api.renderer.requestRender();
   };
 
@@ -264,27 +234,12 @@ const tui: TuiPlugin = async (api) => {
           }}
         />
       ),
-      home_prompt_right: () => (
-        <PromptRight
-          api={api}
-          sessionID=""
-          subscribe={subscribe}
-          text={() => ""}
-        />
-      ),
       sidebar_content: (_ctx, props) => (
         <SubagentSidebar
           api={api}
           sessionID={props.session_id}
           state={subagents}
           subscribe={subscribe}
-        />
-      ),
-      sidebar_footer: (_ctx, props) => (
-        <ReactiveText
-          api={api}
-          subscribe={subscribe}
-          text={() => renderSubagentFooter(subagents, props.session_id)}
         />
       )
     }

@@ -14,6 +14,7 @@ import {
 
 export const OpenCodeInsights: Plugin = async (_input, options?: InsightsOptions) => {
   const store = createCaptureStore(options);
+  const experimental = options?.experimental ?? false;
 
   try {
     await store.initialize?.();
@@ -33,28 +34,30 @@ export const OpenCodeInsights: Plugin = async (_input, options?: InsightsOptions
     dispose: async () => {
       await store.close?.();
     },
-    event: async ({ event }) => {
+    event: async ({ event }: { event: unknown }) => {
       await capture(normalizeEventCapture(event));
     },
-    "chat.message": async (input, output) => {
+    "chat.message": async (input: unknown, output: unknown) => {
       await capture(normalizeChatMessageCapture(input, output));
     },
-    "chat.params": async (input, output) => {
+    "chat.params": async (input: unknown, output: unknown) => {
       await capture(normalizeChatParamsCapture(input, output));
     },
-    "chat.headers": async (input, output) => {
-      await capture(normalizeChatHeadersCapture(input, output));
-    },
-    "experimental.chat.messages.transform": async (input, output) => {
-      await capture(normalizeExperimentalChatMessagesTransformCapture(input, output));
-    },
-    "experimental.chat.system.transform": async (input, output) => {
-      await capture(normalizeExperimentalChatSystemTransformCapture(input, output));
-    },
-    "tool.execute.before": async (input, output) => {
+    ...(experimental && {
+      "chat.headers": async (input: unknown, output: unknown) => {
+        await capture(normalizeChatHeadersCapture(input, output));
+      },
+      "experimental.chat.messages.transform": async (input: unknown, output: unknown) => {
+        await capture(normalizeExperimentalChatMessagesTransformCapture(input, output));
+      },
+      "experimental.chat.system.transform": async (input: unknown, output: unknown) => {
+        await capture(normalizeExperimentalChatSystemTransformCapture(input, output));
+      }
+    }),
+    "tool.execute.before": async (input: unknown, output: unknown) => {
       await capture(normalizeToolCapture("tool.execute.before", input, output));
     },
-    "tool.execute.after": async (input, output) => {
+    "tool.execute.after": async (input: unknown, output: unknown) => {
       await capture(normalizeToolCapture("tool.execute.after", input, output));
     }
   };

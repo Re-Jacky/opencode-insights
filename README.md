@@ -47,10 +47,11 @@ npm rm @rejacky/opencode-insights
 
 ## What You Get
 
-- Live TPS, average TPS, and average TTFT in the OpenCode prompt zone.
-- Right-sidebar subagent status: running, done, failed, elapsed time, and token/context usage when OpenCode exposes it.
+- Live TPS, average TPS, and average TTFT in the OpenCode session prompt zone.
+- Subagent status (running, done, failed, elapsed time, and token/context usage) in the sidebar.
 - Local capture of OpenCode hook/event data without redaction.
 - A local web viewer for sessions, messages, hooks, request context, system/messages transforms, and assistant responses.
+- Native OpenCode footer components (project directory and version) remain visible — the plugin does not override `sidebar_footer` or `home_prompt_right` slots.
 
 ## Open The Viewer
 
@@ -163,6 +164,25 @@ You can override storage in `opencode.json` or `opencode.jsonc`:
 This plugin intentionally does not redact anything. It stores data locally exactly as OpenCode exposes it to plugin hooks and events.
 
 Captured data can include prompts, system messages, provider metadata, API keys exposed inside hook payloads, tool arguments, headers, reasoning text, and response events. Use it only on machines where local full-fidelity capture is acceptable.
+
+## Experimental Features
+
+The request-interception hooks (`chat.headers`, `experimental.chat.messages.transform`, `experimental.chat.system.transform`) are disabled by default. They capture additional request context (HTTP headers, transformed messages, system prompts) but are not yet mature.
+
+To enable them, pass `experimental: true` in the plugin options:
+
+```json
+{
+  "plugin": [
+    [
+      "@rejacky/opencode-insights",
+      {
+        "experimental": true
+      }
+    ]
+  ]
+}
+```
 
 ## Captured Hooks
 

@@ -32,6 +32,9 @@ export type CaptureStore = {
 export type InsightsOptions = {
   dataDir?: unknown;
   dbPath?: unknown;
+  /** Enable experimental request capture (chat.headers, messages/system transforms).
+   *  Disabled by default — these hooks intercept request data and are not yet mature. */
+  experimental?: boolean;
 };
 
 let sequence = 0;
