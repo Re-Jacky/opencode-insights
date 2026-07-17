@@ -11,10 +11,18 @@ import {
   normalizeToolCapture,
   type InsightsOptions
 } from "./capture.js";
+import { ensureCliShim } from "./cli-shim.js";
 
-export const OpenCodeInsights: Plugin = async (_input, options?: InsightsOptions) => {
+type OpenCodeInsightsOptions = InsightsOptions & {
+  cliShim?: boolean | undefined;
+};
+
+export const OpenCodeInsights: Plugin = async (_input, options?: OpenCodeInsightsOptions) => {
+  if (options?.cliShim !== false) {
+    void ensureCliShim().catch(() => undefined);
+  }
+
   const store = createCaptureStore(options);
-  const experimental = options?.experimental ?? false;
 
   try {
     await store.initialize?.();
@@ -43,17 +51,15 @@ export const OpenCodeInsights: Plugin = async (_input, options?: InsightsOptions
     "chat.params": async (input: unknown, output: unknown) => {
       await capture(normalizeChatParamsCapture(input, output));
     },
-    ...(experimental && {
-      "chat.headers": async (input: unknown, output: unknown) => {
-        await capture(normalizeChatHeadersCapture(input, output));
-      },
-      "experimental.chat.messages.transform": async (input: unknown, output: unknown) => {
-        await capture(normalizeExperimentalChatMessagesTransformCapture(input, output));
-      },
-      "experimental.chat.system.transform": async (input: unknown, output: unknown) => {
-        await capture(normalizeExperimentalChatSystemTransformCapture(input, output));
-      }
-    }),
+    "chat.headers": async (input: unknown, output: unknown) => {
+      await capture(normalizeChatHeadersCapture(input, output));
+    },
+    "experimental.chat.messages.transform": async (input: unknown, output: unknown) => {
+      await capture(normalizeExperimentalChatMessagesTransformCapture(input, output));
+    },
+    "experimental.chat.system.transform": async (input: unknown, output: unknown) => {
+      await capture(normalizeExperimentalChatSystemTransformCapture(input, output));
+    },
     "tool.execute.before": async (input: unknown, output: unknown) => {
       await capture(normalizeToolCapture("tool.execute.before", input, output));
     },
@@ -70,7 +76,7 @@ const rootTui: TuiPlugin = async (...args) => {
 };
 export const id = "opencode-insights";
 export { rootTui as tui };
-export default { id, server, tui: rootTui };
+export default { id, server };
 export * from "./capture.js";
 export * from "./metrics.js";
 export * from "./subagents.js";

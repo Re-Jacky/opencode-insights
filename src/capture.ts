@@ -1,4 +1,5 @@
-import { mkdir, appendFile, writeFile } from "node:fs/promises";
+import { mkdir, appendFile, readFile, writeFile } from "node:fs/promises";
+import { existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { homedir } from "node:os";
 
@@ -32,10 +33,11 @@ export type CaptureStore = {
 export type InsightsOptions = {
   dataDir?: unknown;
   dbPath?: unknown;
-  /** Enable experimental request capture (chat.headers, messages/system transforms).
-   *  Disabled by default — these hooks intercept request data and are not yet mature. */
-  experimental?: boolean;
+  retentionDays?: unknown;
 };
+
+const DEFAULT_RETENTION_DAYS = 1;
+const DAY_MS = 24 * 60 * 60 * 1000;
 
 let sequence = 0;
 
@@ -169,13 +171,14 @@ export function normalizeChatHeadersCapture(input: unknown, output: unknown, tim
 }
 
 export function normalizeExperimentalChatMessagesTransformCapture(input: unknown, output: unknown, timestamp = Date.now()): CaptureRecord {
+  const inputRecord = isRecord(input) ? input : {};
   const latestUserMessage = latestUserTransformedMessage(output);
   const info = infoFromTransformedMessage(latestUserMessage);
   return captureRecord({
     id: nextID(timestamp),
     kind: "experimental.chat.messages.transform",
     timestamp,
-    sessionID: sessionIDFrom(info),
+    sessionID: sessionIDFrom(inputRecord),
     messageID: messageIDFrom(info) ?? optionalString(info?.id),
     payload: { input, output }
   });
@@ -227,47 +230,143 @@ export function normalizeToolCapture(
 }
 
 export class JsonlCaptureStore implements CaptureStore {
-  constructor(private readonly path: string) {}
+  constructor(private readonly path: string, private readonly retentionMs = retentionMsFromDays(DEFAULT_RETENTION_DAYS)) {}
 
   async initialize() {
     await mkdir(dirname(this.path), { recursive: true });
     await writeFile(this.path, "", { flag: "a" });
+    await this.pruneExpired();
   }
 
   async append(record: CaptureRecord) {
     await mkdir(dirname(this.path), { recursive: true });
     await appendFile(this.path, `${JSON.stringify(record)}\n`, "utf8");
+    await this.pruneExpired();
+  }
+
+  private async pruneExpired(now = Date.now()) {
+    const cutoff = retentionCutoff(now, this.retentionMs);
+    if (cutoff === undefined || !existsSync(this.path)) return;
+    try {
+      const lines = (await readFile(this.path, "utf8")).split(/\r?\n/);
+      const kept = lines.filter((line) => {
+        const trimmed = line.trim();
+        if (!trimmed) return false;
+        try {
+          const record = JSON.parse(trimmed) as { timestamp?: unknown };
+          return typeof record.timestamp !== "number" || record.timestamp >= cutoff;
+        } catch {
+          return true;
+        }
+      });
+      await writeFile(this.path, kept.length ? `${kept.join("\n")}\n` : "", "utf8");
+    } catch {}
   }
 }
 
-type BunSqliteDatabase = {
-  run(sql: string, ...params: unknown[]): unknown;
-  close?(): void;
-};
+export interface SqliteDb {
+  all(sql: string, ...params: unknown[]): Record<string, unknown>[];
+  run(sql: string, ...params: unknown[]): void;
+  sync(): void;
+  close(): void;
+}
+
+export async function openDatabase(path: string): Promise<SqliteDb | undefined> {
+  try {
+    const mod = (await import("bun:sqlite").catch(() => undefined)) as
+      | { Database: new (path: string) => { query(sql: string): { all(...params: unknown[]): Record<string, unknown>[] }; run(sql: string, ...params: unknown[]): void; close(): void } }
+      | undefined;
+    if (mod) {
+      const db = new mod.Database(path);
+      return {
+        all(sql, ...params) { return db.query(sql).all(...params); },
+        run(sql, ...params) { db.run(sql, ...params); },
+        sync() {},
+        close() { db.close(); }
+      };
+    }
+  } catch {}
+
+  try {
+    const mod = (await import("better-sqlite3").catch(() => undefined)) as
+      | { default?: new (path: string) => { prepare(sql: string): { all(...params: unknown[]): Record<string, unknown>[]; run(...params: unknown[]): void }; close(): void } }
+      | undefined;
+    const Database = mod?.default;
+    if (Database) {
+      const db = new Database(path);
+      return {
+        all(sql, ...params) {
+          return db.prepare(sql).all(...params);
+        },
+        run(sql, ...params) {
+          db.prepare(sql).run(...params);
+        },
+        sync() {},
+        close() {
+          db.close();
+        }
+      };
+    }
+  } catch {}
+
+  return undefined;
+}
 
 export class SqliteCaptureStore implements CaptureStore {
-  private db: BunSqliteDatabase | undefined;
-  private unavailable = false;
+  private db: SqliteDb | undefined;
+  private fallbackStore: JsonlCaptureStore | undefined;
 
-  constructor(private readonly path: string) {}
+  constructor(private readonly path: string, private readonly retentionMs = retentionMsFromDays(DEFAULT_RETENTION_DAYS)) {}
 
   async initialize() {
-    const db = await this.database();
+    await mkdir(dirname(this.path), { recursive: true });
+    const db = await openDatabase(this.path);
     if (!db) {
       const fallbackPath = this.path.endsWith(".sqlite") ? `${this.path}.jsonl` : this.path;
-      await new JsonlCaptureStore(fallbackPath).initialize();
+      this.fallbackStore = new JsonlCaptureStore(fallbackPath, this.retentionMs);
+      await this.fallbackStore.initialize();
+      return;
     }
+    this.db = db;
+    this.db.run(
+      `create table if not exists captures (
+        id text primary key,
+        kind text not null,
+        timestamp integer not null,
+        session_id text,
+        message_id text,
+        provider_id text,
+        model_id text,
+        payload_json text not null
+      )`
+    );
+    this.db.run(`create index if not exists captures_timestamp_idx on captures(timestamp)`);
+    this.db.run(`create index if not exists captures_session_idx on captures(session_id)`);
+    this.db.run(`create index if not exists captures_kind_timestamp_idx on captures(kind, timestamp)`);
+    this.pruneExpired();
+    this.db.sync();
   }
 
   async append(record: CaptureRecord) {
-    const db = await this.database();
-    if (!db) {
-      const fallbackPath = this.path.endsWith(".sqlite") ? `${this.path}.jsonl` : this.path;
-      await new JsonlCaptureStore(fallbackPath).append(record);
+    if (this.fallbackStore) {
+      await this.fallbackStore.append(record);
       return;
     }
 
-    db.run(
+    if (!this.db) {
+      await mkdir(dirname(this.path), { recursive: true });
+      const db = await openDatabase(this.path);
+      if (!db) {
+        const fallbackPath = this.path.endsWith(".sqlite") ? `${this.path}.jsonl` : this.path;
+        this.fallbackStore = new JsonlCaptureStore(fallbackPath, this.retentionMs);
+        await this.fallbackStore.initialize();
+        await this.fallbackStore.append(record);
+        return;
+      }
+      this.db = db;
+    }
+
+    this.db.run(
       `insert into captures (
         id, kind, timestamp, session_id, message_id, provider_id, model_id, payload_json
       ) values (?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -280,52 +379,38 @@ export class SqliteCaptureStore implements CaptureStore {
       record.modelID ?? null,
       JSON.stringify(record.payload)
     );
+    this.pruneExpired();
+    this.db.sync();
   }
 
   async close() {
-    this.db?.close?.();
+    this.db?.close();
     this.db = undefined;
+    this.fallbackStore = undefined;
   }
 
-  private async database() {
-    if (this.db) return this.db;
-    if (this.unavailable) return undefined;
-
-    try {
-      await mkdir(dirname(this.path), { recursive: true });
-      const mod = (await import("bun:sqlite").catch(() => undefined)) as
-        | { Database: new (path: string) => BunSqliteDatabase }
-        | undefined;
-      if (!mod) {
-        this.unavailable = true;
-        return undefined;
-      }
-      const db = new mod.Database(this.path);
-      initializeSchema(db);
-      this.db = db;
-      return db;
-    } catch {
-      this.unavailable = true;
-      return undefined;
-    }
+  private pruneExpired(now = Date.now()) {
+    const cutoff = retentionCutoff(now, this.retentionMs);
+    if (cutoff === undefined) return;
+    this.db?.run("delete from captures where timestamp < ?", cutoff);
   }
-}
-
-function initializeSchema(db: BunSqliteDatabase) {
-  db.run(`create table if not exists captures (
-    id text primary key,
-    kind text not null,
-    timestamp integer not null,
-    session_id text,
-    message_id text,
-    provider_id text,
-    model_id text,
-    payload_json text not null
-  )`);
-  db.run(`create index if not exists captures_timestamp_idx on captures(timestamp)`);
-  db.run(`create index if not exists captures_session_idx on captures(session_id)`);
 }
 
 export function createCaptureStore(options: InsightsOptions = {}): CaptureStore {
-  return new SqliteCaptureStore(resolveCapturePath(options));
+  return new SqliteCaptureStore(resolveCapturePath(options), retentionMsFromDays(resolveRetentionDays(options.retentionDays)));
+}
+
+export function resolveRetentionDays(value: unknown) {
+  if (value === undefined || value === null || value === "") return DEFAULT_RETENTION_DAYS;
+  const numeric = typeof value === "number" ? value : typeof value === "string" ? Number.parseFloat(value) : Number.NaN;
+  if (!Number.isFinite(numeric) || numeric < 0) return DEFAULT_RETENTION_DAYS;
+  return numeric;
+}
+
+function retentionMsFromDays(days: number) {
+  return days <= 0 ? undefined : days * DAY_MS;
+}
+
+function retentionCutoff(now: number, retentionMs: number | undefined) {
+  return retentionMs === undefined ? undefined : now - retentionMs;
 }

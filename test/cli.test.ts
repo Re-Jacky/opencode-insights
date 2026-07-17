@@ -16,7 +16,7 @@ import { join, resolve } from "node:path";
 
 describe("cli helpers", () => {
   test("parses common command options", () => {
-    expect(parseOptions(["--db", "/tmp/insights.sqlite", "--limit", "100", "--json", "--port", "9999", "-o", "/tmp/out.json"])).toEqual({
+    expect(parseOptions(["--db", "/tmp/insights.sqlite", "--limit", "100", "--json", "--port", "9999", "--retention-days", "2.5", "-o", "/tmp/out.json"])).toEqual({
       dbPath: "/tmp/insights.sqlite",
       dryRun: false,
       keepData: false,
@@ -24,6 +24,7 @@ describe("cli helpers", () => {
       limitProvided: true,
       json: true,
       port: 9999,
+      retentionDays: 2.5,
       output: "/tmp/out.json"
     });
   });
@@ -171,16 +172,17 @@ describe("cli helpers", () => {
         limitProvided: false,
         json: false,
         dryRun: false,
-        keepData: false
+        keepData: false,
+        retentionDays: 2
       });
 
       const localServerEntry = resolve("dist/index.js");
       const localTuiEntry = resolve("dist/tui.js");
-      const opencode = JSON.parse(await readFile(join(dir, "opencode.jsonc"), "utf8")) as { plugin: string[] };
+      const opencode = JSON.parse(await readFile(join(dir, "opencode.jsonc"), "utf8")) as { plugin: unknown[] };
       const tui = JSON.parse(await readFile(join(dir, "tui.json"), "utf8")) as { plugin: string[] };
       expect(output).toContain(localServerEntry);
       expect(output).toContain(localTuiEntry);
-      expect(opencode.plugin).toEqual(["existing", localServerEntry]);
+      expect(opencode.plugin).toEqual(["existing", [localServerEntry, { retentionDays: 2 }]]);
       expect(tui.plugin).toEqual(["other-tui", localTuiEntry]);
     } finally {
       process.chdir(originalCwd);

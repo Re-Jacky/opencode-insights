@@ -2,7 +2,7 @@ import { readFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { resolveCapturePath, type CaptureRecord, type InsightsOptions } from "./capture.js";
+import { openDatabase, resolveCapturePath, type CaptureRecord, type InsightsOptions } from "./capture.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -15,11 +15,6 @@ type SqliteRow = {
   provider_id: string | null;
   model_id: string | null;
   payload_json: string;
-};
-
-type BunDatabase = {
-  query(sql: string): { all(...params: unknown[]): SqliteRow[] };
-  close(): void;
 };
 
 export type HistoryMessage = {
@@ -44,6 +39,7 @@ export type HistoryRequest = {
   modelID?: string | undefined;
   summary: string;
   payload: Record<string, unknown>;
+  system?: HistoryRequestHeaders | undefined;
   headers?: HistoryRequestHeaders | undefined;
   response?: HistoryResponse | undefined;
 };
@@ -71,8 +67,12 @@ export type HistoryResponse = {
 
 export type HistorySession = {
   id: string;
+  parentID?: string | undefined;
   title?: string | undefined;
   updatedAt?: number | undefined;
+  cwd?: string | undefined;
+  root?: string | undefined;
+  project?: string | undefined;
   messages: HistoryMessage[];
   requests: HistoryRequest[];
 };
@@ -123,12 +123,62 @@ export async function readRecentCaptures(options: InsightsOptions & { limit?: nu
   return records.slice(-Math.max(1, options.limit ?? 20)).reverse();
 }
 
+export async function readViewerCaptures(options: InsightsOptions & { limit?: number } = {}): Promise<CaptureRecord[]> {
+  const dbPath = resolveCapturePath(options);
+  const sqliteRecords = await readSqliteViewerCaptures(dbPath, options.limit ?? 5000);
+  if (sqliteRecords) return sqliteRecords;
+
+  const jsonlPath = dbPath.endsWith(".sqlite") ? `${dbPath}.jsonl` : dbPath;
+  if (!existsSync(jsonlPath)) return [];
+
+  const records = parseJsonlRecords(await readFile(jsonlPath, "utf8"));
+  return records
+    .filter((record) => isViewerCaptureKind(record.kind))
+    .slice(-Math.max(1, options.limit ?? 5000))
+    .reverse();
+}
+
+export async function readCaptureRecord(id: string, options: InsightsOptions = {}): Promise<CaptureRecord | undefined> {
+  const dbPath = resolveCapturePath(options);
+  if (!existsSync(dbPath)) return undefined;
+
+  try {
+    const db = await openDatabase(dbPath);
+    if (db) {
+      try {
+        const rows = db.all("select id, kind, timestamp, session_id, message_id, provider_id, model_id, payload_json from captures where id = ?", id);
+        const row = rows[0] as SqliteRow | undefined;
+        if (!row) return undefined;
+        return rowToCapture(row);
+      } finally {
+        db.close();
+      }
+    }
+  } catch {}
+
+  try {
+    const escapedId = id.replace(/'/g, "'\\''");
+    const { stdout } = await execFileAsync("sqlite3", [
+      "-json", dbPath,
+      `select id, kind, timestamp, session_id, message_id, provider_id, model_id, payload_json from captures where id = '${escapedId}'`
+    ], { maxBuffer: 128 * 1024 * 1024 });
+    if (!stdout.trim()) return undefined;
+    const rows = JSON.parse(stdout) as SqliteRow[];
+    const row = rows[0];
+    if (!row) return undefined;
+    return rowToCapture(row);
+  } catch {
+    return undefined;
+  }
+}
+
 export function buildRequestHistory(records: CaptureRecord[]): RequestHistory {
   const sessions = new Map<string, HistorySession>();
   const messages = new Map<string, HistoryMessage>();
   const responses = new Map<string, HistoryResponse>();
-  const responseByParent = new Map<string, HistoryResponse>();
+  const responsesByParent = new Map<string, HistoryResponse[]>();
   const requests: HistoryRequest[] = [];
+  const pendingSystemTransforms: HistoryRequest[] = [];
 
   const getSession = (sessionID: string): HistorySession => {
     const existing = sessions.get(sessionID);
@@ -163,7 +213,30 @@ export function buildRequestHistory(records: CaptureRecord[]): RequestHistory {
     return created;
   };
 
-  for (const record of records.slice().sort((a, b) => a.timestamp - b.timestamp)) {
+  const addRequest = (request: HistoryRequest) => {
+    requests.push(request);
+    if (request.sessionID) {
+      getSession(request.sessionID).requests.push(request);
+      if (request.messageID) getMessage(request.sessionID, request.messageID, "user").requests.push(request);
+    }
+  };
+
+  const addResponseByParent = (response: HistoryResponse) => {
+    if (!response.parentID) return;
+    const key = `${response.sessionID}:${response.parentID}`;
+    const parentResponses = responsesByParent.get(key) ?? [];
+    if (!parentResponses.includes(response)) parentResponses.push(response);
+    responsesByParent.set(key, parentResponses);
+  };
+
+  const updateSessionPath = (session: HistorySession, path: unknown) => {
+    if (!isRecord(path)) return;
+    session.cwd = optionalString(path.cwd) ?? session.cwd;
+    session.root = optionalString(path.root) ?? session.root;
+    session.project = projectName(session.root) ?? projectName(session.cwd) ?? session.project;
+  };
+
+  for (const record of records.slice().sort((a, b) => a.timestamp - b.timestamp || a.id.localeCompare(b.id))) {
     if (record.sessionID) getSession(record.sessionID);
 
     if (record.kind === "chat.message") {
@@ -180,10 +253,11 @@ export function buildRequestHistory(records: CaptureRecord[]): RequestHistory {
       if (!request.messageID && request.sessionID) {
         request.messageID = latestUserMessageBefore(messages, request.sessionID, request.timestamp)?.id;
       }
-      requests.push(request);
-      if (request.sessionID) {
-        getSession(request.sessionID).requests.push(request);
-        if (request.messageID) getMessage(request.sessionID, request.messageID, "user").requests.push(request);
+      if (record.kind === "experimental.chat.system.transform") {
+        pendingSystemTransforms.push(request);
+      } else {
+        attachPendingSystemTransform(pendingSystemTransforms, request);
+        addRequest(request);
       }
     }
 
@@ -203,8 +277,10 @@ export function buildRequestHistory(records: CaptureRecord[]): RequestHistory {
       const sessionID = optionalString(info.id) ?? optionalString(properties.sessionID);
       if (!sessionID) continue;
       const session = getSession(sessionID);
+      session.parentID = optionalString(info.parentID) ?? session.parentID;
       session.title = optionalString(info.title) ?? session.title;
       session.updatedAt = numberFromPath(info.time, "updated") ?? session.updatedAt;
+      updateSessionPath(session, info.path);
       continue;
     }
 
@@ -214,6 +290,7 @@ export function buildRequestHistory(records: CaptureRecord[]): RequestHistory {
       const messageID = optionalString(info.id);
       if (!sessionID || !messageID) continue;
       const role = optionalString(info.role) ?? "unknown";
+      updateSessionPath(getSession(sessionID), info.path);
       if (role === "assistant") {
         const response = getResponse(sessionID, messageID, role);
         response.createdAt = numberFromPath(info.time, "created") ?? response.createdAt;
@@ -223,7 +300,7 @@ export function buildRequestHistory(records: CaptureRecord[]): RequestHistory {
         response.cost = typeof info.cost === "number" ? info.cost : response.cost;
         response.finish = optionalString(info.finish) ?? response.finish;
         response.events.push(record.payload);
-        if (response.parentID) responseByParent.set(`${sessionID}:${response.parentID}`, response);
+        addResponseByParent(response);
         continue;
       }
       const message = getMessage(sessionID, messageID, role);
@@ -257,11 +334,20 @@ export function buildRequestHistory(records: CaptureRecord[]): RequestHistory {
     }
   }
 
+  for (const request of pendingSystemTransforms) addRequest(request);
+
   for (const session of sessions.values()) {
     for (const message of session.messages) {
-      message.response = responseByParent.get(`${message.sessionID}:${message.id}`);
-      for (const request of message.requests) {
-        if (requestShouldOwnAssistantResponse(request)) request.response = message.response;
+      const messageResponses = (responsesByParent.get(`${message.sessionID}:${message.id}`) ?? []).sort(
+        (a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0)
+      );
+      message.response = messageResponses.at(-1);
+
+      let responseIndex = 0;
+      for (const request of message.requests.slice().sort((a, b) => a.timestamp - b.timestamp)) {
+        if (!requestShouldOwnAssistantResponse(request)) continue;
+        request.response = messageResponses[responseIndex] ?? message.response;
+        if (responseIndex < messageResponses.length) responseIndex += 1;
       }
     }
     session.messages.sort((a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0));
@@ -278,15 +364,11 @@ async function readSqliteCaptures(path: string, limit: number): Promise<CaptureR
   if (!existsSync(path)) return undefined;
 
   try {
-    const mod = (await import("bun:sqlite").catch(() => undefined)) as
-      | { Database: new (path: string, options?: { readonly?: boolean }) => BunDatabase }
-      | undefined;
-    if (!mod) return readSqliteCapturesWithCli(path, limit);
-
-    const db = new mod.Database(path, { readonly: true });
+    const db = await openDatabase(path);
+    if (!db) return readSqliteCapturesWithCli(path, limit);
     try {
-      const rows = db.query(recentCaptureSql(Math.max(1, limit))).all();
-      return dedupeRows(rows).map(rowToCapture);
+      const rows = db.all(recentCaptureSql(Math.max(1, limit)));
+      return dedupeRows(rows as SqliteRow[]).map(rowToCapture);
     } finally {
       db.close();
     }
@@ -309,17 +391,46 @@ async function readSqliteCapturesWithCli(path: string, limit: number): Promise<C
   }
 }
 
+async function readSqliteViewerCaptures(path: string, limit: number): Promise<CaptureRecord[] | undefined> {
+  if (!existsSync(path)) return undefined;
+
+  try {
+    const db = await openDatabase(path);
+    if (!db) return readSqliteViewerCapturesWithCli(path, limit);
+    try {
+      const rows = db.all(viewerCaptureSql(Math.max(1, limit)));
+      return dedupeRows(rows as SqliteRow[]).map(rowToCapture);
+    } finally {
+      db.close();
+    }
+  } catch {
+    return readSqliteViewerCapturesWithCli(path, limit);
+  }
+}
+
+async function readSqliteViewerCapturesWithCli(path: string, limit: number): Promise<CaptureRecord[] | undefined> {
+  if (!existsSync(path)) return undefined;
+
+  try {
+    const { stdout } = await execFileAsync("sqlite3", ["-json", path, viewerCaptureSql(Math.max(1, Math.trunc(limit)))], {
+      maxBuffer: 128 * 1024 * 1024
+    });
+    if (!stdout.trim()) return [];
+    return dedupeRows(JSON.parse(stdout) as SqliteRow[]).map(rowToCapture);
+  } catch {
+    return undefined;
+  }
+}
+
 function recentCaptureSql(limit: number) {
   return `select id, kind, timestamp, session_id, message_id, provider_id, model_id, payload_json
           from captures
           where id in (
-            select id from captures order by timestamp desc limit ${limit}
-          )
-          or id in (
             select id from captures
             where kind in (
               'chat.params',
               'chat.message',
+              'chat.headers',
               'experimental.chat.messages.transform',
               'experimental.chat.system.transform'
             )
@@ -329,11 +440,50 @@ function recentCaptureSql(limit: number) {
           or id in (
             select id from captures
             where kind = 'event'
-              and json_extract(payload_json, '$.event.type') in ('message.updated', 'message.part.updated', 'message.part.delta')
+              and json_extract(payload_json, '$.event.type') in (
+                'message.updated',
+                'message.part.updated',
+                'message.part.delta',
+                'session.updated',
+                'session.created'
+              )
             order by timestamp desc
             limit ${limit}
           )
           order by timestamp desc`;
+}
+
+function viewerCaptureSql(limit: number) {
+  return `select id, kind, timestamp, session_id, message_id, provider_id, model_id, payload_json
+          from captures
+          where id in (
+            select id from captures
+            where kind in (
+              'chat.params',
+              'chat.message',
+              'experimental.chat.system.transform'
+            )
+            order by timestamp desc
+            limit ${limit}
+          )
+          or id in (
+            select id from captures
+            where kind = 'event'
+              and json_extract(payload_json, '$.event.type') in (
+                'message.updated',
+                'message.part.updated',
+                'message.part.delta',
+                'session.updated',
+                'session.created'
+              )
+            order by timestamp desc
+            limit ${limit}
+          )
+          order by timestamp desc`;
+}
+
+function isViewerCaptureKind(kind: CaptureRecord["kind"]) {
+  return kind === "chat.params" || kind === "chat.message" || kind === "experimental.chat.system.transform" || kind === "event";
 }
 
 function dedupeRows(rows: SqliteRow[]) {
@@ -403,19 +553,29 @@ function agentFromCapture(record: CaptureRecord, input: Record<string, unknown>)
 }
 
 function messageIDForCapture(record: CaptureRecord, input: Record<string, unknown>) {
-  if (record.kind === "experimental.chat.messages.transform") {
-    return latestUserMessageIDFromTransform(record.payload.output) ?? record.messageID;
-  }
   return record.messageID ?? messageIDFromPayload(input.message);
 }
 
-function latestUserMessageIDFromTransform(output: unknown) {
-  if (!isRecord(output) || !Array.isArray(output.messages)) return undefined;
-  for (const message of output.messages.slice().reverse()) {
-    if (!isRecord(message) || !isRecord(message.info)) continue;
-    if (optionalString(message.info.role) === "user") return optionalString(message.info.id);
+function attachPendingSystemTransform(pendingSystemTransforms: HistoryRequest[], request: HistoryRequest) {
+  let index = -1;
+  for (let candidateIndex = pendingSystemTransforms.length - 1; candidateIndex >= 0; candidateIndex -= 1) {
+    const candidate = pendingSystemTransforms[candidateIndex];
+    if (
+      candidate &&
+      candidate.sessionID === request.sessionID &&
+      candidate.providerID === request.providerID &&
+      candidate.modelID === request.modelID &&
+      candidate.timestamp <= request.timestamp &&
+      request.timestamp - candidate.timestamp <= 5_000
+    ) {
+      index = candidateIndex;
+      break;
+    }
   }
-  return undefined;
+  if (index < 0) return;
+  const [system] = pendingSystemTransforms.splice(index, 1);
+  if (!system) return;
+  request.system = { id: system.id, timestamp: system.timestamp, payload: system.payload };
 }
 
 function latestUserMessageBefore(messages: Map<string, HistoryMessage>, sessionID: string, timestamp: number) {
@@ -504,6 +664,13 @@ function findFirstString(value: Record<string, unknown>, keys: string[]) {
     if (typeof item === "string" && item.length > 0) return item;
   }
   return undefined;
+}
+
+function projectName(path: string | undefined) {
+  if (!path) return undefined;
+  const normalized = path.replace(/\/+$/, "");
+  if (!normalized) return undefined;
+  return normalized.split("/").filter(Boolean).at(-1) ?? normalized;
 }
 
 function numberFromPath(value: unknown, key: string) {

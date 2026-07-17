@@ -12,45 +12,64 @@ opencode plugin @rejacky/opencode-insights --global
 
 Restart OpenCode after installing the plugin.
 
+On startup, the plugin creates a user-local `opencode-insights` command shim in:
+
+```text
+~/.local/bin
+```
+
+Make sure that directory is on your `PATH`, then run the CLI directly:
+
+```bash
+opencode-insights doctor
+```
+
 ## Uninstall
 
 Remove this plugin from `opencode.json` / `opencode.jsonc`, remove it from `tui.json`, and delete the local Insights database files:
 
 ```bash
-npx opencode-insights uninstall
+opencode-insights uninstall
 ```
 
 Preview the cleanup without changing files:
 
 ```bash
-npx opencode-insights uninstall --dry-run
+opencode-insights uninstall --dry-run
 ```
 
 Keep captured data while removing only the plugin config entries:
 
 ```bash
-npx opencode-insights uninstall --keep-data
+opencode-insights uninstall --keep-data
 ```
 
 Use a custom OpenCode config directory or data location:
 
 ```bash
-npx opencode-insights uninstall --config-dir ~/.config/opencode --data-dir ~/.opencode-insights
+opencode-insights uninstall --config-dir ~/.config/opencode --data-dir ~/.opencode-insights
 ```
 
-After uninstalling, restart OpenCode. If you also want to remove the npm package from your OpenCode config/package directory, run:
+After uninstalling, restart OpenCode. Packages installed with `opencode plugin ... --global` are stored under OpenCode's package cache. On macOS/Linux this is typically:
 
-```bash
-cd ~/.config/opencode
-npm rm @rejacky/opencode-insights
+```text
+~/.cache/opencode/packages
 ```
+
+For this machine, that expands to:
+
+```text
+/Users/zyao/.cache/opencode/packages
+```
+
+The `uninstall` command removes plugin config entries and local Insights data; it does not remove cached OpenCode package directories automatically.
 
 ## What You Get
 
 - Live TPS, average TPS, and average TTFT in the OpenCode session prompt zone.
 - Subagent status (running, done, failed, elapsed time, and token/context usage) in the sidebar.
 - Local capture of OpenCode hook/event data without redaction.
-- A local web viewer for sessions, messages, hooks, request context, system/messages transforms, and assistant responses.
+- A local web viewer for reconstructed sessions, user turns, hidden request context, system/messages transforms, and assistant thinking/response sequences.
 - Native OpenCode footer components (project directory and version) remain visible — the plugin does not override `sidebar_footer` or `home_prompt_right` slots.
 
 ## Open The Viewer
@@ -58,13 +77,13 @@ npm rm @rejacky/opencode-insights
 Start the local web viewer and open it in your browser:
 
 ```bash
-npx opencode-insights open --limit 5000 --port 8765
+opencode-insights open --limit 5000 --port 8765
 ```
 
 Or run the server only:
 
 ```bash
-npx opencode-insights serve --limit 5000 --port 8765
+opencode-insights serve --limit 5000 --port 8765
 ```
 
 Then open:
@@ -75,59 +94,66 @@ http://127.0.0.1:8765/
 
 The viewer shows:
 
-- `MSG` rows for user messages.
-- `HOOK` rows for OpenCode plugin hooks.
-- `Summary`, `Request`, `Response`, and `Raw` tabs.
-- Expandable/collapsible JSON trees with `Expand All` and `Collapse All`.
+- Project/session filters with subagent sessions nested under their parent session.
+- User-message rows only, with each row showing visible assistant steps and hidden context count.
+- A `Summary` view with the agent thinking/response sequence.
+- Collapsed hidden-context previews that expand to plain text system prompt or hidden prompt-like content.
+- A dark/light theme switcher.
 
 ## Common Commands
 
 List recent raw captures:
 
 ```bash
-npx opencode-insights recent --limit 20
+opencode-insights recent --limit 20
 ```
 
 List reconstructed sessions:
 
 ```bash
-npx opencode-insights sessions --limit 5000
+opencode-insights sessions --limit 5000
 ```
 
 Print one reconstructed session:
 
 ```bash
-npx opencode-insights show ses_xxx --limit 10000
+opencode-insights show ses_xxx --limit 10000
 ```
 
 Export one session to JSON:
 
 ```bash
-npx opencode-insights export ses_xxx --limit 10000 --output ./session.json
+opencode-insights export ses_xxx --limit 10000 --output ./session.json
 ```
 
 Check DB path, table health, row counts, and SQLite readability:
 
 ```bash
-npx opencode-insights doctor
+opencode-insights doctor
 ```
 
 Compact the local SQLite DB after heavy testing:
 
 ```bash
-npx opencode-insights vacuum
+opencode-insights vacuum
 ```
 
 Remove plugin config entries and delete local captured data:
 
 ```bash
-npx opencode-insights uninstall
+opencode-insights uninstall
 ```
 
-If the command is not available through `npx`, run the installed binary directly from your OpenCode config directory:
+If the command is not available, confirm `~/.local/bin` is on `PATH`, or run the installed binary directly from OpenCode's package cache:
 
 ```bash
-./node_modules/.bin/opencode-insights doctor
+~/.cache/opencode/packages/node_modules/.bin/opencode-insights doctor
+```
+
+You can also run the published package through npm without relying on the OpenCode cache:
+
+```bash
+npx -y -p @rejacky/opencode-insights opencode-insights doctor
 ```
 
 ## Storage
@@ -144,7 +170,9 @@ If SQLite is unavailable in the plugin runtime, the fallback path is:
 ~/.opencode-insights/insights.sqlite.jsonl
 ```
 
-You can override storage in `opencode.json` or `opencode.jsonc`:
+The database keeps one day of captures by default and auto-cleans older rows on startup and after new captures. Set `retentionDays` to another number of days, or `0` to disable auto-cleaning.
+
+You can override storage and retention in `opencode.json` or `opencode.jsonc`:
 
 ```json
 {
@@ -152,7 +180,8 @@ You can override storage in `opencode.json` or `opencode.jsonc`:
     [
       "@rejacky/opencode-insights",
       {
-        "dbPath": "/absolute/path/to/insights.sqlite"
+        "dbPath": "/absolute/path/to/insights.sqlite",
+        "retentionDays": 1
       }
     ]
   ]
@@ -165,24 +194,9 @@ This plugin intentionally does not redact anything. It stores data locally exact
 
 Captured data can include prompts, system messages, provider metadata, API keys exposed inside hook payloads, tool arguments, headers, reasoning text, and response events. Use it only on machines where local full-fidelity capture is acceptable.
 
-## Experimental Features
+## Request Context Capture
 
-The request-interception hooks (`chat.headers`, `experimental.chat.messages.transform`, `experimental.chat.system.transform`) are disabled by default. They capture additional request context (HTTP headers, transformed messages, system prompts) but are not yet mature.
-
-To enable them, pass `experimental: true` in the plugin options:
-
-```json
-{
-  "plugin": [
-    [
-      "@rejacky/opencode-insights",
-      {
-        "experimental": true
-      }
-    ]
-  ]
-}
-```
+Request-context capture is enabled by default. The plugin records OpenCode's `chat.headers`, `experimental.chat.messages.transform`, and `experimental.chat.system.transform` hooks so the viewer can show provider headers, transformed conversation messages, and system prompt content when OpenCode exposes them. The `experimental.chat.*` names are OpenCode hook names; no `experimental` plugin option is required.
 
 ## Captured Hooks
 

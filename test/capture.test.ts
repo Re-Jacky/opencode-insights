@@ -4,12 +4,14 @@ import { tmpdir } from "node:os";
 import { afterEach, describe, expect, test } from "vitest";
 import {
   JsonlCaptureStore,
+  createCaptureStore,
   defaultDataDir,
   normalizeChatParamsCapture,
   normalizeEventCapture,
   normalizeExperimentalChatMessagesTransformCapture,
   normalizeExperimentalChatSystemTransformCapture,
-  normalizeToolCapture
+  normalizeToolCapture,
+  openDatabase
 } from "../src/capture.js";
 
 const cleanup: string[] = [];
@@ -85,7 +87,7 @@ describe("full-fidelity local capture", () => {
     });
   });
 
-  test("captures experimental chat transform hooks without redaction", () => {
+  test("captures request-context transform hooks without redaction", () => {
     const messages = normalizeExperimentalChatMessagesTransformCapture(
       {},
       {
@@ -131,14 +133,15 @@ describe("full-fidelity local capture", () => {
     cleanup.push(dir);
     const path = join(dir, "capture.jsonl");
     const store = new JsonlCaptureStore(path);
+    const now = Date.now();
 
-    await store.append(normalizeEventCapture({ type: "message.updated", secret: "keep-me" }, 20));
+    await store.append(normalizeEventCapture({ type: "message.updated", secret: "keep-me" }, now));
     await store.append(
       normalizeToolCapture(
         "tool.execute.before",
         { tool: "bash", sessionID: "ses_1", callID: "call_1" },
         { args: { command: "echo secret" } },
-        30
+        now + 1
       )
     );
 
@@ -146,5 +149,28 @@ describe("full-fidelity local capture", () => {
     expect(lines).toHaveLength(2);
     expect(lines[0].payload.event.secret).toBe("keep-me");
     expect(lines[1].payload.output.args.command).toBe("echo secret");
+  });
+
+  test("auto-cleans SQLite captures older than the configured retention window", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "opencode-insights-"));
+    cleanup.push(dir);
+    const dbPath = join(dir, "insights.sqlite");
+    const now = Date.now();
+    const store = createCaptureStore({ dbPath, retentionDays: 1 });
+
+    await store.initialize?.();
+    await store.append(normalizeEventCapture({ type: "message.updated", id: "old" }, now - 2 * 24 * 60 * 60 * 1000));
+    await store.append(normalizeEventCapture({ type: "message.updated", id: "fresh" }, now));
+    await store.close?.();
+
+    const db = await openDatabase(dbPath);
+    expect(db).toBeDefined();
+    try {
+      const rows = db?.all("select id, timestamp, payload_json from captures order by timestamp") ?? [];
+      expect(rows).toHaveLength(1);
+      expect(JSON.parse(String(rows[0]?.payload_json)).event.id).toBe("fresh");
+    } finally {
+      db?.close();
+    }
   });
 });

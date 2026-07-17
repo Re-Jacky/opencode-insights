@@ -27,6 +27,7 @@ type CliOptions = {
   port?: number | undefined;
   output?: string | undefined;
   configDir?: string | undefined;
+  retentionDays?: number | undefined;
   dryRun: boolean;
   keepData: boolean;
 };
@@ -162,10 +163,16 @@ export function parseOptions(args: string[]): CliOptions {
       const value = args[index + 1];
       if (value) options.configDir = value;
       index += 1;
+    } else if (arg === "--retention-days") {
+      options.retentionDays = Number.parseFloat(args[index + 1] ?? "");
+      index += 1;
     }
   }
   if (!Number.isFinite(options.limit) || options.limit < 1) options.limit = DEFAULT_RECENT_LIMIT;
   if (options.port !== undefined && (!Number.isFinite(options.port) || options.port < 1)) options.port = 8765;
+  if (options.retentionDays !== undefined && (!Number.isFinite(options.retentionDays) || options.retentionDays < 0)) {
+    options.retentionDays = undefined;
+  }
   return options;
 }
 
@@ -175,7 +182,7 @@ function parsePositionals(args: string[]) {
     const arg = args[index];
     if (!arg) continue;
     if (arg.startsWith("--")) {
-      if (["--db", "--data-dir", "--limit", "--host", "--port", "--output", "--config-dir"].includes(arg)) index += 1;
+      if (["--db", "--data-dir", "--limit", "--host", "--port", "--output", "--config-dir", "--retention-days"].includes(arg)) index += 1;
       continue;
     }
     if (arg === "-o") {
@@ -323,7 +330,7 @@ export async function configureOpenCodeDebug(options: CliOptions) {
 
   const opencodeConfig = await readJsonConfig(opencodePath, { plugin: [] });
   const tuiConfig = await readJsonConfig(tuiPath, { plugin: [] });
-  setSinglePluginSpec(opencodeConfig, SERVER_PLUGIN_SPEC, localServerEntry);
+  setSinglePluginSpec(opencodeConfig, SERVER_PLUGIN_SPEC, [localServerEntry, debugServerOptions(options)], localServerEntry);
   setSinglePluginSpec(tuiConfig, TUI_PLUGIN_SPEC, localTuiEntry);
   removePlugin(tuiConfig, SUBPATH_TUI_PLUGIN_SPEC);
 
@@ -421,6 +428,12 @@ function isJsonObject(value: unknown): value is JsonObject {
   return !!value && typeof value === "object" && !Array.isArray(value);
 }
 
+function debugServerOptions(options: CliOptions) {
+  const serverOptions: JsonObject = {};
+  if (options.retentionDays !== undefined) serverOptions.retentionDays = options.retentionDays;
+  return serverOptions;
+}
+
 export function addUniquePlugin(config: JsonObject, plugin: string) {
   const current = Array.isArray(config.plugin) ? config.plugin : [];
   if (current.includes(plugin)) {
@@ -442,9 +455,10 @@ function isPluginEntry(entry: unknown, plugin: string) {
   return entry === plugin || (Array.isArray(entry) && entry[0] === plugin);
 }
 
-function setSinglePluginSpec(config: JsonObject, previousPlugin: string, nextPlugin: string) {
+function setSinglePluginSpec(config: JsonObject, previousPlugin: string, nextPlugin: unknown, nextPluginSpec?: string) {
   const current = Array.isArray(config.plugin) ? config.plugin : [];
-  const next = current.filter((entry) => !isInsightsPluginEntry(entry, previousPlugin, nextPlugin));
+  const localPlugin = nextPluginSpec ?? (typeof nextPlugin === "string" ? nextPlugin : "");
+  const next = current.filter((entry) => !isInsightsPluginEntry(entry, previousPlugin, localPlugin));
   config.plugin = [...next, nextPlugin];
 }
 
@@ -522,7 +536,7 @@ async function writeJsonConfig(path: string, config: JsonObject) {
 function usage() {
   return [
     "Usage:",
-    "  opencode-insights debug [--config-dir DIR] [--dry-run]",
+    "  opencode-insights debug [--config-dir DIR] [--retention-days DAYS] [--dry-run]",
     "  opencode-insights uninstall [--config-dir DIR] [--db PATH] [--data-dir DIR] [--keep-data] [--dry-run]",
     "  opencode-insights recent [--db PATH] [--data-dir DIR] [--limit N] [--json]",
     "  opencode-insights sessions [--db PATH] [--data-dir DIR] [--limit N] [--json]",

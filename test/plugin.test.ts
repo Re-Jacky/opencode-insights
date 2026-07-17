@@ -17,8 +17,18 @@ describe("plugin startup", () => {
     cleanup.push(dir);
     const dbPath = join(dir, "insights.sqlite");
 
-    await OpenCodeInsights({} as never, { dbPath });
+    await OpenCodeInsights({} as never, { dbPath, cliShim: false });
 
     expect(existsSync(dbPath) || existsSync(`${dbPath}.jsonl`)).toBe(true);
+  });
+
+  test("exposes request-context hooks by default", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "opencode-insights-plugin-"));
+    cleanup.push(dir);
+    const plugin = await OpenCodeInsights({} as never, { dbPath: join(dir, "insights.sqlite"), cliShim: false });
+
+    expect(plugin).toHaveProperty("chat.headers");
+    expect(plugin).toHaveProperty("experimental.chat.messages.transform");
+    expect(plugin).toHaveProperty("experimental.chat.system.transform");
   });
 });

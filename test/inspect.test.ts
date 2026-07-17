@@ -1,5 +1,12 @@
 import { describe, expect, test } from "vitest";
-import { buildRequestHistory, formatCaptureSummary, parseJsonlRecords } from "../src/inspect.js";
+import { buildRequestHistory, formatCaptureSummary, parseJsonlRecords, readCaptureRecord } from "../src/inspect.js";
+import { execFile } from "node:child_process";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { promisify } from "node:util";
+
+const execFileAsync = promisify(execFile);
 
 describe("capture inspection", () => {
   test("parses jsonl capture records", () => {
@@ -251,9 +258,9 @@ describe("capture inspection", () => {
         kind: "experimental.chat.messages.transform",
         timestamp: 2_100,
         sessionID: "ses_1",
-        messageID: "msg_user_1",
+        messageID: "msg_user_2",
         payload: {
-          input: {},
+          input: { sessionID: "ses_1" },
           output: {
             messages: [
               { info: { id: "msg_user_1", role: "user", sessionID: "ses_1" }, parts: [] },
@@ -280,5 +287,276 @@ describe("capture inspection", () => {
 
     expect(first?.requests.map((request) => request.id)).toEqual([]);
     expect(second?.requests.map((request) => request.id)).toEqual(["second_transform", "second_system"]);
+  });
+
+  test("attaches system transform context to the following model request", () => {
+    const history = buildRequestHistory([
+      {
+        id: "user",
+        kind: "chat.message",
+        timestamp: 1_000,
+        sessionID: "ses_1",
+        payload: {
+          input: { sessionID: "ses_1" },
+          output: {
+            message: { id: "msg_user_1", role: "user", sessionID: "ses_1", time: { created: 1_000 } },
+            parts: [{ type: "text", messageID: "msg_user_1", sessionID: "ses_1", text: "hi" }]
+          }
+        }
+      },
+      {
+        id: "system_for_build",
+        kind: "experimental.chat.system.transform",
+        timestamp: 1_100,
+        sessionID: "ses_1",
+        providerID: "openai",
+        modelID: "gpt-test",
+        payload: {
+          input: { sessionID: "ses_1", model: { id: "gpt-test", providerID: "openai" } },
+          output: { system: ["system prompt"] }
+        }
+      },
+      {
+        id: "params_build",
+        kind: "chat.params",
+        timestamp: 1_101,
+        sessionID: "ses_1",
+        messageID: "msg_user_1",
+        providerID: "openai",
+        modelID: "gpt-test",
+        payload: {
+          input: {
+            sessionID: "ses_1",
+            agent: "build",
+            message: { id: "msg_user_1" },
+            provider: { id: "openai" },
+            model: { id: "gpt-test" }
+          },
+          output: { temperature: 0 }
+        }
+      }
+    ]);
+
+    const message = history.sessions[0]?.messages.find((item) => item.id === "msg_user_1");
+    expect(history.requests.map((request) => request.id)).toEqual(["params_build"]);
+    expect(message?.requests.map((request) => request.id)).toEqual(["params_build"]);
+    expect(message?.requests[0]?.system?.id).toBe("system_for_build");
+  });
+
+  test("keeps separate assistant responses for multi-step build requests", () => {
+    const history = buildRequestHistory([
+      {
+        id: "user",
+        kind: "chat.message",
+        timestamp: 1_000,
+        sessionID: "ses_1",
+        payload: {
+          input: { sessionID: "ses_1" },
+          output: {
+            message: { id: "msg_user", role: "user", sessionID: "ses_1", time: { created: 1_000 } },
+            parts: [{ type: "text", messageID: "msg_user", sessionID: "ses_1", text: "dispatch a subagent" }]
+          }
+        }
+      },
+      {
+        id: "assistant_first",
+        kind: "event",
+        timestamp: 1_010,
+        sessionID: "ses_1",
+        payload: {
+          event: {
+            type: "message.updated",
+            properties: {
+              sessionID: "ses_1",
+              info: { id: "msg_assistant_1", role: "assistant", parentID: "msg_user", sessionID: "ses_1", time: { created: 1_010 } }
+            }
+          }
+        }
+      },
+      {
+        id: "req_first",
+        kind: "chat.params",
+        timestamp: 1_020,
+        sessionID: "ses_1",
+        messageID: "msg_user",
+        providerID: "openai",
+        modelID: "gpt-test",
+        payload: {
+          input: { sessionID: "ses_1", agent: "build", message: { id: "msg_user" } },
+          output: { maxOutputTokens: 4096 }
+        }
+      },
+      {
+        id: "assistant_first_text",
+        kind: "event",
+        timestamp: 1_030,
+        sessionID: "ses_1",
+        messageID: "msg_assistant_1",
+        payload: {
+          event: {
+            type: "message.part.updated",
+            properties: {
+              sessionID: "ses_1",
+              part: { type: "text", sessionID: "ses_1", messageID: "msg_assistant_1", text: "first model step" }
+            }
+          }
+        }
+      },
+      {
+        id: "assistant_second",
+        kind: "event",
+        timestamp: 1_040,
+        sessionID: "ses_1",
+        payload: {
+          event: {
+            type: "message.updated",
+            properties: {
+              sessionID: "ses_1",
+              info: { id: "msg_assistant_2", role: "assistant", parentID: "msg_user", sessionID: "ses_1", time: { created: 1_040 } }
+            }
+          }
+        }
+      },
+      {
+        id: "req_second",
+        kind: "chat.params",
+        timestamp: 1_050,
+        sessionID: "ses_1",
+        messageID: "msg_user",
+        providerID: "openai",
+        modelID: "gpt-test",
+        payload: {
+          input: { sessionID: "ses_1", agent: "build", message: { id: "msg_user" } },
+          output: { maxOutputTokens: 4096 }
+        }
+      },
+      {
+        id: "assistant_second_text",
+        kind: "event",
+        timestamp: 1_060,
+        sessionID: "ses_1",
+        messageID: "msg_assistant_2",
+        payload: {
+          event: {
+            type: "message.part.updated",
+            properties: {
+              sessionID: "ses_1",
+              part: { type: "text", sessionID: "ses_1", messageID: "msg_assistant_2", text: "second model step" }
+            }
+          }
+        }
+      }
+    ]);
+
+    const requests = history.sessions[0]?.messages.find((item) => item.id === "msg_user")?.requests;
+
+    expect(requests?.map((request) => ({ id: request.id, response: request.response?.id }))).toEqual([
+      { id: "req_first", response: "msg_assistant_1" },
+      { id: "req_second", response: "msg_assistant_2" }
+    ]);
+  });
+
+  test("derives session parent and project metadata for viewer grouping", () => {
+    const history = buildRequestHistory([
+      {
+        id: "parent_session",
+        kind: "event",
+        timestamp: 1_000,
+        sessionID: "ses_parent",
+        payload: {
+          event: {
+            type: "session.updated",
+            properties: {
+              sessionID: "ses_parent",
+              info: { id: "ses_parent", title: "Parent", time: { updated: 1_000 } }
+            }
+          }
+        }
+      },
+      {
+        id: "child_session",
+        kind: "event",
+        timestamp: 1_100,
+        sessionID: "ses_child",
+        payload: {
+          event: {
+            type: "session.created",
+            properties: {
+              sessionID: "ses_child",
+              info: { id: "ses_child", parentID: "ses_parent", title: "Child", time: { updated: 1_100 } }
+            }
+          }
+        }
+      },
+      {
+        id: "assistant_path",
+        kind: "event",
+        timestamp: 1_200,
+        sessionID: "ses_child",
+        payload: {
+          event: {
+            type: "message.updated",
+            properties: {
+              sessionID: "ses_child",
+              info: {
+                id: "msg_assistant",
+                role: "assistant",
+                sessionID: "ses_child",
+                parentID: "msg_user",
+                path: { cwd: "/Users/zyao/Desktop/opencode-insights", root: "/" },
+                time: { created: 1_200 }
+              }
+            }
+          }
+        }
+      }
+    ]);
+
+    const child = history.sessions.find((session) => session.id === "ses_child");
+    expect(child).toMatchObject({
+      parentID: "ses_parent",
+      cwd: "/Users/zyao/Desktop/opencode-insights",
+      root: "/",
+      project: "opencode-insights"
+    });
+  });
+
+  test("reads one SQLite capture through CLI fallback when native SQLite is unavailable", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "opencode-insights-inspect-"));
+    const dbPath = join(dir, "insights.sqlite");
+    try {
+      await execFileAsync("sqlite3", [
+        dbPath,
+        `create table captures (
+          id text primary key,
+          kind text not null,
+          timestamp integer not null,
+          session_id text,
+          message_id text,
+          provider_id text,
+          model_id text,
+          payload_json text not null
+        );
+        insert into captures values (
+          'capture_1',
+          'chat.params',
+          1234,
+          'ses_1',
+          'msg_1',
+          'openai',
+          'gpt-test',
+          '{"input":{"agent":"build"},"output":{"temperature":0}}'
+        );`
+      ]);
+
+      await expect(readCaptureRecord("capture_1", { dbPath })).resolves.toMatchObject({
+        id: "capture_1",
+        kind: "chat.params",
+        sessionID: "ses_1",
+        payload: { input: { agent: "build" }, output: { temperature: 0 } }
+      });
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
   });
 });
