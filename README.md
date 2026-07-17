@@ -24,6 +24,37 @@ Make sure that directory is on your `PATH`, then run the CLI directly:
 opencode-insights doctor
 ```
 
+## Update
+
+`opencode plugin` does not re-install or upgrade already-cached packages. To update to the latest version, clear the cached copy and reinstall:
+
+```bash
+rm -rf ~/.cache/opencode/packages/node_modules/@rejacky/opencode-insights
+opencode plugin @rejacky/opencode-insights --global
+```
+
+Then restart OpenCode.
+
+You can also run the latest published version directly via `npx` without reinstalling:
+
+```bash
+npx -y -p @rejacky/opencode-insights opencode-insights doctor
+```
+
+## Preview
+
+![opencode-insights TUI](assets/tui.png)
+
+Inspect captured sessions with the web viewer:
+
+```bash
+opencode-insights open
+```
+
+OpenCode Insights viewer listening at http://127.0.0.1:8765
+
+![opencode-insights web viewer](assets/insights.png)
+
 ## Uninstall
 
 Remove this plugin from `opencode.json` / `opencode.jsonc`, remove it from `tui.json`, and delete the local Insights database files:
@@ -193,56 +224,3 @@ You can override storage and retention in `opencode.json` or `opencode.jsonc`:
 This plugin intentionally does not redact anything. It stores data locally exactly as OpenCode exposes it to plugin hooks and events.
 
 Captured data can include prompts, system messages, provider metadata, API keys exposed inside hook payloads, tool arguments, headers, reasoning text, and response events. Use it only on machines where local full-fidelity capture is acceptable.
-
-## Request Context Capture
-
-Request-context capture is enabled by default. The plugin records OpenCode's `chat.headers`, `experimental.chat.messages.transform`, and `experimental.chat.system.transform` hooks so the viewer can show provider headers, transformed conversation messages, and system prompt content when OpenCode exposes them. The `experimental.chat.*` names are OpenCode hook names; no `experimental` plugin option is required.
-
-## Captured Hooks
-
-The viewer labels OpenCode hook records as `HOOK` because they are not raw HTTP requests.
-
-Common hook rows:
-
-- `HOOK title`: OpenCode title-generation model call, usually only on the first turn.
-- `HOOK build`: Main assistant response model-call hook.
-- `HOOK messages.transform`: Final conversation messages OpenCode prepared before model execution.
-- `HOOK system.transform`: System prompt strings OpenCode prepared before model execution.
-
-Hook payload meaning:
-
-- `payload.input`: Context OpenCode passed into the plugin hook.
-- `payload.output`: Value returned by the hook, such as model settings or transformed messages.
-- `headers.output.headers`: Headers returned by the headers hook.
-- Response text is captured from OpenCode event stream rows such as `message.part.delta` and `message.part.updated`.
-
-The plugin reconstructs a logical LLM request from hooks and events. It does not capture the final provider HTTP body unless OpenCode exposes a lower-level transport hook in the future.
-
-## SQLite Queries
-
-Count captured rows:
-
-```bash
-sqlite3 ~/.opencode-insights/insights.sqlite \
-  "select kind, count(*) from captures group by kind order by kind;"
-```
-
-Find text in captured payloads:
-
-```bash
-sqlite3 ~/.opencode-insights/insights.sqlite "
-select datetime(timestamp/1000,'unixepoch','localtime') as time,
-       kind,
-       session_id,
-       message_id,
-       substr(payload_json, 1, 1200) as preview
-from captures
-where payload_json like '%search text%'
-order by timestamp desc
-limit 20;
-"
-```
-
-## Development
-
-Development and publish notes live in [DEVELOPMENT.md](./DEVELOPMENT.md).
