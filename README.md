@@ -87,12 +87,6 @@ After uninstalling, restart OpenCode. Packages installed with `opencode plugin .
 ~/.cache/opencode/packages
 ```
 
-For this machine, that expands to:
-
-```text
-/Users/zyao/.cache/opencode/packages
-```
-
 The `uninstall` command removes plugin config entries and local Insights data; it does not remove cached OpenCode package directories automatically.
 
 ## What You Get
