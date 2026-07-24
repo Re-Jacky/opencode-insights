@@ -132,12 +132,13 @@ describe("viewer conversation helpers", () => {
           message_id text,
           provider_id text,
           model_id text,
+          event_type text,
           payload_json text not null
         );
-        insert into captures values ('msg', 'chat.message', 1000, 'ses_1', null, null, null, '${messagePayload.replace(/'/g, "''")}');
-        insert into captures values ('sys', 'experimental.chat.system.transform', 1010, 'ses_1', null, 'openai', 'gpt-test', '${systemPayload.replace(/'/g, "''")}');
-        insert into captures values ('params', 'chat.params', 1011, 'ses_1', null, 'openai', 'gpt-test', '${paramsPayload.replace(/'/g, "''")}');
-        insert into captures values ('transform', 'experimental.chat.messages.transform', 1012, 'ses_1', 'msg_user', null, null, '${bulkyTransformPayload.replace(/'/g, "''")}');`
+        insert into captures values ('msg', 'chat.message', 1000, 'ses_1', null, null, null, null, '${messagePayload.replace(/'/g, "''")}');
+        insert into captures values ('sys', 'experimental.chat.system.transform', 1010, 'ses_1', null, 'openai', 'gpt-test', null, '${systemPayload.replace(/'/g, "''")}');
+        insert into captures values ('params', 'chat.params', 1011, 'ses_1', null, 'openai', 'gpt-test', null, '${paramsPayload.replace(/'/g, "''")}');
+        insert into captures values ('transform', 'experimental.chat.messages.transform', 1012, 'ses_1', 'msg_user', null, null, null, '${bulkyTransformPayload.replace(/'/g, "''")}');`
       ]);
 
       const history = await readHistory({ dbPath, limit: 100 });

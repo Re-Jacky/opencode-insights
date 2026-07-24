@@ -312,6 +312,11 @@ export async function openDatabase(path: string): Promise<SqliteDb | undefined> 
   return undefined;
 }
 
+export function extractEventType(payload: Record<string, unknown>): string | null {
+  const event = isRecord(payload.event) ? payload.event : {};
+  return typeof event.type === "string" ? event.type : null;
+}
+
 export class SqliteCaptureStore implements CaptureStore {
   private db: SqliteDb | undefined;
   private fallbackStore: JsonlCaptureStore | undefined;
@@ -337,12 +342,26 @@ export class SqliteCaptureStore implements CaptureStore {
         message_id text,
         provider_id text,
         model_id text,
+        event_type text,
         payload_json text not null
       )`
     );
     this.db.run(`create index if not exists captures_timestamp_idx on captures(timestamp)`);
     this.db.run(`create index if not exists captures_session_idx on captures(session_id)`);
     this.db.run(`create index if not exists captures_kind_timestamp_idx on captures(kind, timestamp)`);
+    this.db.run(`create index if not exists captures_kind_type_ts_idx on captures(kind, event_type, timestamp)`);
+
+    // Migration: add event_type column for databases created before this column existed
+    const existingColumns = db.all("select name from pragma_table_info('captures') where name = 'event_type'");
+    if (existingColumns.length === 0) {
+      try { db.run(`alter table captures add column event_type text`); } catch {}
+    }
+    // Backfill event_type for existing event rows
+    try { db.run(`update captures set event_type = json_extract(payload_json, '$.event.type') where kind = 'event' and event_type is null`); } catch {}
+
+    // Enable WAL mode for better read performance
+    try { db.run(`pragma journal_mode = wal`); } catch {}
+
     this.pruneExpired();
     this.db.sync();
   }
@@ -366,10 +385,11 @@ export class SqliteCaptureStore implements CaptureStore {
       this.db = db;
     }
 
+    const eventType = record.kind === "event" ? extractEventType(record.payload) : null;
     this.db.run(
       `insert into captures (
-        id, kind, timestamp, session_id, message_id, provider_id, model_id, payload_json
-      ) values (?, ?, ?, ?, ?, ?, ?, ?)`,
+        id, kind, timestamp, session_id, message_id, provider_id, model_id, event_type, payload_json
+      ) values (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       record.id,
       record.kind,
       record.timestamp,
@@ -377,6 +397,7 @@ export class SqliteCaptureStore implements CaptureStore {
       record.messageID ?? null,
       record.providerID ?? null,
       record.modelID ?? null,
+      eventType,
       JSON.stringify(record.payload)
     );
     this.pruneExpired();

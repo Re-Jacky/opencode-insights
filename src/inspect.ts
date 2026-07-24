@@ -2,7 +2,7 @@ import { readFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { openDatabase, resolveCapturePath, type CaptureRecord, type InsightsOptions } from "./capture.js";
+import { openDatabase, resolveCapturePath, type CaptureRecord, type InsightsOptions, type SqliteDb } from "./capture.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -360,6 +360,14 @@ export function buildRequestHistory(records: CaptureRecord[]): RequestHistory {
   };
 }
 
+function ensureEventTypeColumn(db: SqliteDb) {
+  const existing = db.all("select name from pragma_table_info('captures') where name = 'event_type'");
+  if (existing.length === 0) {
+    db.run(`alter table captures add column event_type text`);
+  }
+  db.run(`update captures set event_type = json_extract(payload_json, '$.event.type') where kind = 'event' and event_type is null`);
+}
+
 async function readSqliteCaptures(path: string, limit: number): Promise<CaptureRecord[] | undefined> {
   if (!existsSync(path)) return undefined;
 
@@ -367,6 +375,7 @@ async function readSqliteCaptures(path: string, limit: number): Promise<CaptureR
     const db = await openDatabase(path);
     if (!db) return readSqliteCapturesWithCli(path, limit);
     try {
+      ensureEventTypeColumn(db);
       const rows = db.all(recentCaptureSql(Math.max(1, limit)));
       return dedupeRows(rows as SqliteRow[]).map(rowToCapture);
     } finally {
@@ -377,18 +386,27 @@ async function readSqliteCaptures(path: string, limit: number): Promise<CaptureR
   }
 }
 
-async function readSqliteCapturesWithCli(path: string, limit: number): Promise<CaptureRecord[] | undefined> {
-  if (!existsSync(path)) return undefined;
-
+async function runSqlite3Json(path: string, sql: string): Promise<string | undefined> {
   try {
-    const { stdout } = await execFileAsync("sqlite3", ["-json", path, recentCaptureSql(Math.max(1, Math.trunc(limit)))], {
+    const { stdout } = await execFileAsync("sqlite3", ["-json", path, sql], {
       maxBuffer: 128 * 1024 * 1024
     });
-    if (!stdout.trim()) return [];
-    return dedupeRows(JSON.parse(stdout) as SqliteRow[]).map(rowToCapture);
+    return stdout;
   } catch {
     return undefined;
   }
+}
+
+async function readSqliteCapturesWithCli(path: string, limit: number): Promise<CaptureRecord[] | undefined> {
+  if (!existsSync(path)) return undefined;
+
+  // Ensure event_type column exists (attempt, ignore failure)
+  await runSqlite3Json(path, "alter table captures add column event_type text");
+  await runSqlite3Json(path, "update captures set event_type = json_extract(payload_json, '$.event.type') where kind = 'event' and event_type is null");
+
+  const stdout = await runSqlite3Json(path, recentCaptureSql(Math.max(1, Math.trunc(limit))));
+  if (!stdout?.trim()) return [];
+  return dedupeRows(JSON.parse(stdout) as SqliteRow[]).map(rowToCapture);
 }
 
 async function readSqliteViewerCaptures(path: string, limit: number): Promise<CaptureRecord[] | undefined> {
@@ -398,6 +416,7 @@ async function readSqliteViewerCaptures(path: string, limit: number): Promise<Ca
     const db = await openDatabase(path);
     if (!db) return readSqliteViewerCapturesWithCli(path, limit);
     try {
+      ensureEventTypeColumn(db);
       const rows = db.all(viewerCaptureSql(Math.max(1, limit)));
       return dedupeRows(rows as SqliteRow[]).map(rowToCapture);
     } finally {
@@ -411,15 +430,13 @@ async function readSqliteViewerCaptures(path: string, limit: number): Promise<Ca
 async function readSqliteViewerCapturesWithCli(path: string, limit: number): Promise<CaptureRecord[] | undefined> {
   if (!existsSync(path)) return undefined;
 
-  try {
-    const { stdout } = await execFileAsync("sqlite3", ["-json", path, viewerCaptureSql(Math.max(1, Math.trunc(limit)))], {
-      maxBuffer: 128 * 1024 * 1024
-    });
-    if (!stdout.trim()) return [];
-    return dedupeRows(JSON.parse(stdout) as SqliteRow[]).map(rowToCapture);
-  } catch {
-    return undefined;
-  }
+  // Ensure event_type column exists (attempt, ignore failure)
+  await runSqlite3Json(path, "alter table captures add column event_type text");
+  await runSqlite3Json(path, "update captures set event_type = json_extract(payload_json, '$.event.type') where kind = 'event' and event_type is null");
+
+  const stdout = await runSqlite3Json(path, viewerCaptureSql(Math.max(1, Math.trunc(limit))));
+  if (!stdout?.trim()) return [];
+  return dedupeRows(JSON.parse(stdout) as SqliteRow[]).map(rowToCapture);
 }
 
 function recentCaptureSql(limit: number) {
@@ -440,7 +457,7 @@ function recentCaptureSql(limit: number) {
           or id in (
             select id from captures
             where kind = 'event'
-              and json_extract(payload_json, '$.event.type') in (
+              and event_type in (
                 'message.updated',
                 'message.part.updated',
                 'message.part.delta',
@@ -469,7 +486,7 @@ function viewerCaptureSql(limit: number) {
           or id in (
             select id from captures
             where kind = 'event'
-              and json_extract(payload_json, '$.event.type') in (
+              and event_type in (
                 'message.updated',
                 'message.part.updated',
                 'message.part.delta',
