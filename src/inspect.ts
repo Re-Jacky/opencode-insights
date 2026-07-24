@@ -143,7 +143,7 @@ export async function readCaptureRecord(id: string, options: InsightsOptions = {
   if (!existsSync(dbPath)) return undefined;
 
   try {
-    const db = await openDatabase(dbPath);
+    const db = await openDatabase(dbPath, true);
     if (db) {
       try {
         const rows = db.all("select id, kind, timestamp, session_id, message_id, provider_id, model_id, payload_json from captures where id = ?", id);
@@ -372,7 +372,7 @@ async function readSqliteCaptures(path: string, limit: number): Promise<CaptureR
   if (!existsSync(path)) return undefined;
 
   try {
-    const db = await openDatabase(path);
+    const db = await openDatabase(path, true);
     if (!db) return readSqliteCapturesWithCli(path, limit);
     try {
       ensureEventTypeColumn(db);
@@ -413,7 +413,7 @@ async function readSqliteViewerCaptures(path: string, limit: number): Promise<Ca
   if (!existsSync(path)) return undefined;
 
   try {
-    const db = await openDatabase(path);
+    const db = await openDatabase(path, true);
     if (!db) return readSqliteViewerCapturesWithCli(path, limit);
     try {
       ensureEventTypeColumn(db);

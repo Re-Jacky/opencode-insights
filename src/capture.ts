@@ -1,5 +1,5 @@
 import { mkdir, appendFile, readFile, writeFile } from "node:fs/promises";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { homedir } from "node:os";
 
@@ -271,7 +271,7 @@ export interface SqliteDb {
   close(): void;
 }
 
-export async function openDatabase(path: string): Promise<SqliteDb | undefined> {
+export async function openDatabase(path: string, readonly = false): Promise<SqliteDb | undefined> {
   try {
     const mod = (await import("bun:sqlite").catch(() => undefined)) as
       | { Database: new (path: string) => { query(sql: string): { all(...params: unknown[]): Record<string, unknown>[] }; run(sql: string, ...params: unknown[]): void; close(): void } }
@@ -308,6 +308,32 @@ export async function openDatabase(path: string): Promise<SqliteDb | undefined> 
       };
     }
   } catch {}
+
+  if (readonly) {
+    try {
+      const initSqlJs = (await import("sql.js").catch(() => undefined)) as
+        | { default: () => Promise<{ Database: new (data?: ArrayLike<number> | Buffer) => { run(sql: string, params?: unknown[]): void; exec(sql: string): { columns: string[]; values: unknown[][] }[]; prepare(sql: string): { bind(params?: unknown[]): void; step(): boolean; getAsObject(): Record<string, unknown>; free(): void }; close(): void } }> }
+        | undefined;
+      if (initSqlJs) {
+        const SQL = await initSqlJs.default();
+        const data = readFileSync(path);
+        const db = new SQL.Database(data);
+        return {
+          all(sql, ...params) {
+            const stmt = db.prepare(sql);
+            if (params.length > 0) stmt.bind(params);
+            const rows: Record<string, unknown>[] = [];
+            while (stmt.step()) rows.push(stmt.getAsObject());
+            stmt.free();
+            return rows;
+          },
+          run() {},
+          sync() {},
+          close() { db.close(); }
+        };
+      }
+    } catch {}
+  }
 
   return undefined;
 }
