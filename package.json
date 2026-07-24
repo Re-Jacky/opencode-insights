@@ -47,6 +47,7 @@
   "scripts": {
     "build": "tsup",
     "debug": "npm run build && node dist/cli.js debug",
+    "postinstall": "npm rebuild better-sqlite3",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
     "verify": "npm run typecheck && npm run test && npm run build",
