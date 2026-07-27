@@ -2,6 +2,7 @@ import { describe, expect, test } from "vitest";
 import {
   applySubagentEvent,
   createSubagentState,
+  getSubagentSidebarRowAtLine,
   getSubagentSidebarModel,
   pruneStaleSubagents,
   renderSubagentFooter,
@@ -10,6 +11,25 @@ import {
 } from "../src/subagents.js";
 
 describe("subagent status", () => {
+  test("finds the sidebar row for either line of a rendered subagent", () => {
+    const model = {
+      title: "Subagents",
+      summary: "1 running · 1 done · 0 error",
+      rows: [
+        { id: "ses_first", title: "First", subtitle: "00:01", status: "running" as const },
+        { id: "ses_second", title: "Second", subtitle: "00:02", status: "done" as const }
+      ]
+    };
+
+    expect(getSubagentSidebarRowAtLine(model, 0)).toBeUndefined();
+    expect(getSubagentSidebarRowAtLine(model, 1)).toBeUndefined();
+    expect(getSubagentSidebarRowAtLine(model, 2)?.id).toBe("ses_first");
+    expect(getSubagentSidebarRowAtLine(model, 3)?.id).toBe("ses_first");
+    expect(getSubagentSidebarRowAtLine(model, 4)).toBeUndefined();
+    expect(getSubagentSidebarRowAtLine(model, 5)?.id).toBe("ses_second");
+    expect(getSubagentSidebarRowAtLine(model, 6)?.id).toBe("ses_second");
+  });
+
   test("tracks running, completed, and failed subagents", () => {
     const state = createSubagentState();
 

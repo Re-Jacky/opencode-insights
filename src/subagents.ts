@@ -157,6 +157,16 @@ export function getSubagentSidebarModel(
   };
 }
 
+export function getSubagentSidebarRowAtLine(model: SubagentSidebarModel, line: number) {
+  let rowStart = 2;
+
+  for (const [index, row] of model.rows.entries()) {
+    if (index > 0) rowStart += 1;
+    if (line === rowStart || line === rowStart + 1) return row;
+    rowStart += 2;
+  }
+}
+
 export function renderSubagentSidebar(state: SubagentState, parentID: string, options: { now?: number } = {}) {
   const model = getSubagentSidebarModel(state, parentID, options);
   if (!model) return "";

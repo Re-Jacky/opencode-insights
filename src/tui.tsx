@@ -1,5 +1,5 @@
 /** @jsxImportSource @opentui/solid */
-import { createTextAttributes, StyledText, type TextChunk, type TextRenderable } from "@opentui/core";
+import { createTextAttributes, StyledText, type MouseEvent, type TextChunk, type TextRenderable } from "@opentui/core";
 import type { TuiPlugin, TuiPluginApi, TuiPluginModule } from "@opencode-ai/plugin/tui";
 import { createSignal, onCleanup } from "solid-js";
 import {
@@ -12,6 +12,7 @@ import {
 import {
   applySubagentEvent,
   createSubagentState,
+  getSubagentSidebarRowAtLine,
   getSubagentSidebarModel,
   type SubagentState
 } from "./subagents.js";
@@ -63,11 +64,38 @@ function SubagentSidebar(props: {
 }) {
   let text: TextRenderable | undefined;
   const [collapsed, setCollapsed] = createSignal(false);
+  const [hoveredRowID, setHoveredRowID] = createSignal<string | undefined>();
   const titleAttributes = createTextAttributes({ bold: true });
 
-  const toggle = () => {
+  const toggle = (event: MouseEvent) => {
+    if (!text || event.y !== text.y) return;
     setCollapsed((prev) => !prev);
     props.api.renderer.requestRender();
+  };
+
+  const openSubagent = (event: MouseEvent) => {
+    if (!text || collapsed()) return;
+    const model = getSubagentSidebarModel(props.state, props.sessionID);
+    if (!model) return;
+    const row = getSubagentSidebarRowAtLine(model, event.y - text.y);
+    if (!row) return;
+    props.api.route.navigate("session", { sessionID: row.id });
+  };
+
+  const hoverSubagent = (event: MouseEvent) => {
+    if (!text || collapsed()) return;
+    const model = getSubagentSidebarModel(props.state, props.sessionID);
+    const row = model && getSubagentSidebarRowAtLine(model, event.y - text.y);
+    const nextRowID = row?.id;
+    if (nextRowID === hoveredRowID()) return;
+    setHoveredRowID(nextRowID);
+    sync();
+  };
+
+  const clearHoveredSubagent = () => {
+    if (!hoveredRowID()) return;
+    setHoveredRowID(undefined);
+    sync();
   };
 
   const sync = () => {
@@ -75,7 +103,9 @@ function SubagentSidebar(props: {
     const model = getSubagentSidebarModel(props.state, props.sessionID);
     text.visible = !!model;
     text.height = model ? "auto" : 0;
-    text.content = model ? renderSubagentStyledSidebar(props.state, props.sessionID, props.api, titleAttributes, collapsed()) : "";
+    text.content = model
+      ? renderSubagentStyledSidebar(props.state, props.sessionID, props.api, titleAttributes, collapsed(), hoveredRowID())
+      : "";
     props.api.renderer.requestRender();
   };
 
@@ -93,6 +123,9 @@ function SubagentSidebar(props: {
         sync();
       }}
       onMouseDown={toggle}
+      onMouseUp={openSubagent}
+      onMouseMove={hoverSubagent}
+      onMouseOut={clearHoveredSubagent}
       fg={props.api.theme.current.textMuted}
     >
       {""}
@@ -105,7 +138,8 @@ function renderSubagentStyledSidebar(
   sessionID: string,
   api: TuiPluginApi,
   titleAttributes: number,
-  collapsed: boolean
+  collapsed: boolean,
+  hoveredRowID?: string
 ) {
   const model = getSubagentSidebarModel(state, sessionID);
   if (!model) return "";
@@ -124,21 +158,23 @@ function renderSubagentStyledSidebar(
         : row.status === "error"
           ? api.theme.current.error
           : api.theme.current.textMuted;
-      chunks.push(textChunk("• ", dotColor));
-      chunks.push(textChunk(`${row.title}\n`, api.theme.current.text));
-      chunks.push(textChunk(row.subtitle, api.theme.current.textMuted));
+      const background = row.id === hoveredRowID ? api.theme.current.backgroundElement : undefined;
+      chunks.push(textChunk("• ", dotColor, undefined, background));
+      chunks.push(textChunk(`${row.title}\n`, api.theme.current.text, undefined, background));
+      chunks.push(textChunk(row.subtitle, api.theme.current.textMuted, undefined, background));
     }
   }
 
   return new StyledText(chunks);
 }
 
-function textChunk(text: string, fg?: TextChunk["fg"], attributes?: number): TextChunk {
+function textChunk(text: string, fg?: TextChunk["fg"], attributes?: number, bg?: TextChunk["bg"]): TextChunk {
   return {
     __isChunk: true,
     text,
     ...(fg === undefined ? {} : { fg }),
-    ...(attributes === undefined ? {} : { attributes })
+    ...(attributes === undefined ? {} : { attributes }),
+    ...(bg === undefined ? {} : { bg })
   };
 }
 

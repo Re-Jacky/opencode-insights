@@ -18,4 +18,19 @@ describe("plugin entrypoints", () => {
     expect(source).toContain("export { id, tui }");
     expect(source).toContain("export default { id, tui }");
   });
+
+  test("opens a subagent row in OpenCode's native session route", () => {
+    const source = readFileSync(new URL("../src/tui.tsx", import.meta.url), "utf8");
+
+    expect(source).toContain('api.route.navigate("session", { sessionID: row.id })');
+    expect(source).toContain("onMouseUp={openSubagent}");
+  });
+
+  test("highlights the hovered subagent row", () => {
+    const source = readFileSync(new URL("../src/tui.tsx", import.meta.url), "utf8");
+
+    expect(source).toContain("onMouseMove={hoverSubagent}");
+    expect(source).toContain("onMouseOut={clearHoveredSubagent}");
+    expect(source).toContain("api.theme.current.backgroundElement");
+  });
 });
