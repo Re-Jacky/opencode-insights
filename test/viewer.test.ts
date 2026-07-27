@@ -152,4 +152,68 @@ describe("viewer conversation helpers", () => {
       await rm(dir, { recursive: true, force: true });
     }
   });
+
+  test("viewer history keeps older project metadata for recent sessions", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "opencode-insights-viewer-"));
+    const dbPath = join(dir, "insights.sqlite");
+    try {
+      const sessionPayload = JSON.stringify({
+        event: {
+          type: "session.updated",
+          properties: {
+            sessionID: "ses_dot",
+            info: {
+              id: "ses_dot",
+              title: "Dot project",
+              path: { cwd: "/Users/zyao/.agentic-connectors", root: "/Users/zyao/.agentic-connectors" },
+              time: { updated: 900 }
+            }
+          }
+        }
+      });
+      const messagePayload = JSON.stringify({
+        input: { sessionID: "ses_dot" },
+        output: {
+          message: { id: "msg_user", role: "user", sessionID: "ses_dot", time: { created: 1_000 } },
+          parts: [{ type: "text", messageID: "msg_user", sessionID: "ses_dot", text: "hi" }]
+        }
+      });
+      const deltaPayload = (id: number) =>
+        JSON.stringify({
+          event: {
+            type: "message.part.delta",
+            properties: { sessionID: "ses_dot", messageID: "msg_assistant", delta: String(id) }
+          }
+        });
+
+      await execFileAsync("sqlite3", [
+        dbPath,
+        `create table captures (
+          id text primary key,
+          kind text not null,
+          timestamp integer not null,
+          session_id text,
+          message_id text,
+          provider_id text,
+          model_id text,
+          event_type text,
+          payload_json text not null
+        );
+        insert into captures values ('session_path', 'event', 900, 'ses_dot', null, null, null, 'session.updated', '${sessionPayload.replace(/'/g, "''")}');
+        insert into captures values ('msg', 'chat.message', 1000, 'ses_dot', null, null, null, null, '${messagePayload.replace(/'/g, "''")}');
+        insert into captures values ('delta_1', 'event', 1100, 'ses_dot', 'msg_assistant', null, null, 'message.part.delta', '${deltaPayload(1).replace(/'/g, "''")}');
+        insert into captures values ('delta_2', 'event', 1200, 'ses_dot', 'msg_assistant', null, null, 'message.part.delta', '${deltaPayload(2).replace(/'/g, "''")}');`
+      ]);
+
+      const history = await readHistory({ dbPath, limit: 1 });
+
+      expect(history.sessions[0]).toMatchObject({
+        cwd: "/Users/zyao/.agentic-connectors",
+        root: "/Users/zyao/.agentic-connectors",
+        project: ".agentic-connectors"
+      });
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
 });

@@ -471,10 +471,9 @@ function recentCaptureSql(limit: number) {
 }
 
 function viewerCaptureSql(limit: number) {
-  return `select id, kind, timestamp, session_id, message_id, provider_id, model_id, payload_json
-          from captures
-          where id in (
-            select id from captures
+  return `with recent_model as (
+            select id, session_id
+            from captures
             where kind in (
               'chat.params',
               'chat.message',
@@ -482,9 +481,10 @@ function viewerCaptureSql(limit: number) {
             )
             order by timestamp desc
             limit ${limit}
-          )
-          or id in (
-            select id from captures
+          ),
+          recent_events as (
+            select id, session_id, payload_json
+            from captures
             where kind = 'event'
               and event_type in (
                 'message.updated',
@@ -495,7 +495,36 @@ function viewerCaptureSql(limit: number) {
               )
             order by timestamp desc
             limit ${limit}
+          ),
+          recent_sessions as (
+            select session_id from recent_model where session_id is not null
+            union
+            select session_id from recent_events where session_id is not null
+            union
+            select json_extract(payload_json, '$.event.properties.sessionID') from recent_events where json_extract(payload_json, '$.event.properties.sessionID') is not null
+            union
+            select json_extract(payload_json, '$.event.properties.info.sessionID') from recent_events where json_extract(payload_json, '$.event.properties.info.sessionID') is not null
+          ),
+          metadata_events as (
+            select id
+            from captures
+            where kind = 'event'
+              and event_type in ('message.updated', 'session.updated', 'session.created')
+              and coalesce(
+                session_id,
+                json_extract(payload_json, '$.event.properties.sessionID'),
+                json_extract(payload_json, '$.event.properties.info.sessionID')
+              ) in (select session_id from recent_sessions)
+              and (
+                json_extract(payload_json, '$.event.properties.info.path.cwd') is not null
+                or json_extract(payload_json, '$.event.properties.info.path.root') is not null
+              )
           )
+          select id, kind, timestamp, session_id, message_id, provider_id, model_id, payload_json
+          from captures
+          where id in (select id from recent_model)
+            or id in (select id from recent_events)
+            or id in (select id from metadata_events)
           order by timestamp desc`;
 }
 

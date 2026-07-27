@@ -521,6 +521,37 @@ describe("capture inspection", () => {
     });
   });
 
+  test("derives project metadata from dot-prefixed working directories", () => {
+    const history = buildRequestHistory([
+      {
+        id: "dot_path",
+        kind: "event",
+        timestamp: 1_000,
+        sessionID: "ses_dot",
+        payload: {
+          event: {
+            type: "session.updated",
+            properties: {
+              sessionID: "ses_dot",
+              info: {
+                id: "ses_dot",
+                title: "Dot path",
+                path: { cwd: "/Users/zyao/.agentic-connectors", root: "/Users/zyao/.agentic-connectors" },
+                time: { updated: 1_000 }
+              }
+            }
+          }
+        }
+      }
+    ]);
+
+    expect(history.sessions[0]).toMatchObject({
+      cwd: "/Users/zyao/.agentic-connectors",
+      root: "/Users/zyao/.agentic-connectors",
+      project: ".agentic-connectors"
+    });
+  });
+
   test("reads one SQLite capture through CLI fallback when native SQLite is unavailable", async () => {
     const dir = await mkdtemp(join(tmpdir(), "opencode-insights-inspect-"));
     const dbPath = join(dir, "insights.sqlite");
