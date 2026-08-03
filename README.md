@@ -91,11 +91,29 @@ The `uninstall` command removes plugin config entries and local Insights data; i
 
 ## What You Get
 
-- Live TPS, average TPS, and average TTFT in the OpenCode session prompt zone.
+- Configurable live metrics in the OpenCode session prompt zone.
 - Subagent status (running, done, failed, elapsed time, and token/context usage) in the sidebar.
 - Local capture of OpenCode hook/event data without redaction.
 - A local web viewer for reconstructed sessions, user turns, hidden request context, system/messages transforms, and assistant thinking/response sequences.
 - Native OpenCode footer components (project directory and version) remain visible — the plugin does not override `sidebar_footer` or `home_prompt_right` slots.
+
+## TUI Metrics Configuration
+
+On TUI startup, Insights creates a configuration file beside its database:
+
+```text
+~/.opencode-insights/config.json
+```
+
+With a custom database path, the configuration file is created in that database's directory. The default keeps the prompt-right display compact:
+
+```json
+{
+  "promptRightMetrics": ["tps", "avg", "used", "cache"]
+}
+```
+
+`promptRightMetrics` controls both the fields and their order. Supported values are `tps`, `avg`, `ttft`, `used`, `cache`, `input`, `output`, and `reasoning`. Values that are not recognized are ignored; an empty or invalid configuration uses the default. Restart OpenCode after editing this file.
 
 ## Open The Viewer
 

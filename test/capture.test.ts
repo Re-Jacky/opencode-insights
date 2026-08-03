@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, describe, expect, test } from "vitest";
@@ -6,6 +6,8 @@ import {
   JsonlCaptureStore,
   createCaptureStore,
   defaultDataDir,
+  readInsightsConfig,
+  resolveInsightsConfigPath,
   normalizeChatParamsCapture,
   normalizeEventCapture,
   normalizeExperimentalChatMessagesTransformCapture,
@@ -23,6 +25,29 @@ afterEach(async () => {
 describe("full-fidelity local capture", () => {
   test("uses a cross-platform home directory for default storage", () => {
     expect(defaultDataDir()).toMatch(/\.opencode-insights$/);
+  });
+
+  test("creates a default metrics config beside the capture database", async () => {
+    const dataDir = await mkdtemp(join(tmpdir(), "opencode-insights-config-"));
+    cleanup.push(dataDir);
+
+    await expect(readInsightsConfig({ dataDir })).resolves.toEqual({
+      promptRightMetrics: ["tps", "avg", "used", "cache"]
+    });
+    await expect(readFile(resolveInsightsConfigPath({ dataDir }), "utf8")).resolves.toContain('"promptRightMetrics"');
+  });
+
+  test("reads supported configured prompt-right metrics in order", async () => {
+    const dataDir = await mkdtemp(join(tmpdir(), "opencode-insights-config-"));
+    cleanup.push(dataDir);
+    await writeFile(
+      resolveInsightsConfigPath({ dataDir }),
+      JSON.stringify({ promptRightMetrics: ["used", "cache", "not-a-metric"] })
+    );
+
+    await expect(readInsightsConfig({ dataDir })).resolves.toEqual({
+      promptRightMetrics: ["used", "cache"]
+    });
   });
 
   test("normalizes chat params without redacting headers or body", () => {

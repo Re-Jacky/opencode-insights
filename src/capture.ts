@@ -2,6 +2,7 @@ import { mkdir, appendFile, readFile, writeFile } from "node:fs/promises";
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { homedir } from "node:os";
+import { DEFAULT_PROMPT_RIGHT_METRICS, type PromptRightMetric } from "./metrics.js";
 
 export type CaptureKind =
   | "chat.message"
@@ -34,6 +35,10 @@ export type InsightsOptions = {
   dataDir?: unknown;
   dbPath?: unknown;
   retentionDays?: unknown;
+};
+
+export type InsightsConfig = {
+  promptRightMetrics: PromptRightMetric[];
 };
 
 const DEFAULT_RETENTION_DAYS = 1;
@@ -125,6 +130,42 @@ export function resolveCapturePath(options: InsightsOptions = {}) {
       ? options.dataDir
       : defaultDataDir();
   return join(dataDir, "insights.sqlite");
+}
+
+export function resolveInsightsConfigPath(options: InsightsOptions = {}) {
+  return join(dirname(resolveCapturePath(options)), "config.json");
+}
+
+export async function readInsightsConfig(options: InsightsOptions = {}): Promise<InsightsConfig> {
+  const path = resolveInsightsConfigPath(options);
+  if (!existsSync(path)) {
+    try {
+      await mkdir(dirname(path), { recursive: true });
+      await writeFile(path, `${JSON.stringify(defaultInsightsConfig(), null, 2)}\n`, "utf8");
+    } catch {
+      return defaultInsightsConfig();
+    }
+  }
+
+  try {
+    return insightsConfigFrom(JSON.parse(await readFile(path, "utf8")));
+  } catch {
+    return defaultInsightsConfig();
+  }
+}
+
+function defaultInsightsConfig(): InsightsConfig {
+  return { promptRightMetrics: [...DEFAULT_PROMPT_RIGHT_METRICS] };
+}
+
+function insightsConfigFrom(value: unknown): InsightsConfig {
+  if (!isRecord(value) || !Array.isArray(value.promptRightMetrics)) return defaultInsightsConfig();
+  const metrics = value.promptRightMetrics.filter(isPromptRightMetric);
+  return metrics.length ? { promptRightMetrics: metrics } : defaultInsightsConfig();
+}
+
+function isPromptRightMetric(value: unknown): value is PromptRightMetric {
+  return value === "tps" || value === "avg" || value === "ttft" || value === "used" || value === "cache" || value === "input" || value === "output" || value === "reasoning";
 }
 
 export function normalizeChatMessageCapture(input: unknown, output: unknown, timestamp = Date.now()): CaptureRecord {

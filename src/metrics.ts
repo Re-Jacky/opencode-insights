@@ -19,10 +19,24 @@ export type SessionAverage = {
   messageCount: number;
 };
 
+export type AssistantResponseUsage = {
+  inputTokens?: number | undefined;
+  outputTokens?: number | undefined;
+  reasoningTokens?: number | undefined;
+  cacheReadTokens?: number | undefined;
+  cacheWriteTokens?: number | undefined;
+  finish?: string | undefined;
+};
+
+export type PromptRightMetric = "tps" | "avg" | "ttft" | "used" | "cache" | "input" | "output" | "reasoning";
+
+export const DEFAULT_PROMPT_RIGHT_METRICS: PromptRightMetric[] = ["tps", "avg", "used", "cache"];
+
 export type MetricsState = {
   streamSamplesBySession: Record<string, StreamSample[]>;
   messageTimingByID: Record<string, MessageTiming>;
   sessionAverageByID: Record<string, SessionAverage>;
+  latestResponseUsageBySession: Record<string, AssistantResponseUsage>;
 };
 
 const STREAM_WINDOW_MS = 5_000;
@@ -33,7 +47,8 @@ export function createMetricsState(): MetricsState {
   return {
     streamSamplesBySession: {},
     messageTimingByID: {},
-    sessionAverageByID: {}
+    sessionAverageByID: {},
+    latestResponseUsageBySession: {}
   };
 }
 
@@ -50,6 +65,9 @@ export function recordAssistantMessage(
     completedAt?: number;
     outputTokens?: number;
     reasoningTokens?: number;
+    inputTokens?: number;
+    cacheReadTokens?: number;
+    cacheWriteTokens?: number;
     finish?: string;
   }
 ) {
@@ -65,6 +83,16 @@ export function recordAssistantMessage(
     };
     return;
   }
+
+  const usage = compactUsage({
+    inputTokens: input.inputTokens,
+    outputTokens: input.outputTokens,
+    reasoningTokens: input.reasoningTokens,
+    cacheReadTokens: input.cacheReadTokens,
+    cacheWriteTokens: input.cacheWriteTokens,
+    finish: input.finish
+  });
+  if (hasTokenUsage(usage)) state.latestResponseUsageBySession[input.sessionID] = usage;
 
   const timing = state.messageTimingByID[input.messageID];
   if (timing?.sessionID === input.sessionID && typeof timing.firstResponseAt === "number") {
@@ -145,6 +173,42 @@ export function renderMetricsText(
   return `TPS ${live} | AVG ${avg} | TTFT ${ttft}`;
 }
 
+export function renderResponseMetricsText(state: MetricsState, sessionID: string) {
+  const usage = state.latestResponseUsageBySession[sessionID];
+  if (!usage || !hasTokenUsage(usage)) return "";
+
+  const used = sumTokens(usage);
+  const cacheRate = cacheReadRate(usage);
+  const parts = [
+    used === undefined ? undefined : `${formatTokenCount(used)} used`,
+    cacheRate === undefined ? undefined : `${formatPercent(cacheRate)} cache`,
+    usage.outputTokens === undefined ? undefined : `${formatTokenCount(usage.outputTokens)} out`,
+    usage.reasoningTokens === undefined ? undefined : `${formatTokenCount(usage.reasoningTokens)} think`
+  ].filter((part): part is string => !!part);
+  return parts.join(" | ");
+}
+
+export function renderPromptRightMetricsText(
+  state: MetricsState,
+  sessionID: string,
+  options: { now?: number; idle?: boolean; metrics?: PromptRightMetric[] } = {}
+) {
+  const usage = state.latestResponseUsageBySession[sessionID];
+  const used = usage ? sumTokens(usage) : undefined;
+  const cacheRate = usage ? cacheReadRate(usage) : undefined;
+  const values: Record<PromptRightMetric, string> = {
+    tps: `TPS ${liveTps(state, sessionID, options) ?? "-"}`,
+    avg: `AVG ${sessionAverage(state, sessionID) ?? "-"}`,
+    ttft: `TTFT ${sessionTtft(state, sessionID) ?? "-"}`,
+    used: `${used === undefined ? "-" : formatTokenCount(used)} used`,
+    cache: `${cacheRate === undefined ? "-" : formatPercent(cacheRate)} cache`,
+    input: `${usage?.inputTokens === undefined ? "-" : formatTokenCount(usage.inputTokens)} in`,
+    output: `${usage?.outputTokens === undefined ? "-" : formatTokenCount(usage.outputTokens)} out`,
+    reasoning: `${usage?.reasoningTokens === undefined ? "-" : formatTokenCount(usage.reasoningTokens)} think`
+  };
+  return (options.metrics?.length ? options.metrics : DEFAULT_PROMPT_RIGHT_METRICS).map((metric) => values[metric]).join(" | ");
+}
+
 function pruneSamples(state: MetricsState, now = Date.now()) {
   for (const [sessionID, samples] of Object.entries(state.streamSamplesBySession)) {
     const next = samples.filter((sample) => now - sample.at <= STREAM_WINDOW_MS);
@@ -213,4 +277,41 @@ function formatRate(value: number, label: "TPS" | "AVG") {
 function formatTtft(value: number) {
   if (!Number.isFinite(value) || value < 0) return undefined;
   return `${value.toFixed(1)}s`;
+}
+
+function compactUsage(usage: AssistantResponseUsage) {
+  return Object.fromEntries(Object.entries(usage).filter(([, value]) => value !== undefined)) as AssistantResponseUsage;
+}
+
+function hasTokenUsage(usage: AssistantResponseUsage) {
+  return [usage.inputTokens, usage.outputTokens, usage.reasoningTokens, usage.cacheReadTokens, usage.cacheWriteTokens].some(
+    (value) => typeof value === "number"
+  );
+}
+
+function sumTokens(usage: AssistantResponseUsage) {
+  const values = [usage.inputTokens, usage.outputTokens, usage.reasoningTokens, usage.cacheReadTokens, usage.cacheWriteTokens].filter(
+    (value): value is number => typeof value === "number"
+  );
+  return values.length ? values.reduce((sum, value) => sum + value, 0) : undefined;
+}
+
+function cacheReadRate(usage: AssistantResponseUsage) {
+  if (typeof usage.cacheReadTokens !== "number") return undefined;
+  const promptTokens = (usage.inputTokens ?? 0) + usage.cacheReadTokens;
+  return promptTokens > 0 ? (usage.cacheReadTokens / promptTokens) * 100 : undefined;
+}
+
+function formatTokenCount(value: number) {
+  if (Math.abs(value) >= 1_000_000) return `${formatAbbreviatedTokenCount(value, 1_000_000)}m`;
+  if (Math.abs(value) >= 1_000) return `${formatAbbreviatedTokenCount(value, 1_000)}k`;
+  return String(Math.round(value));
+}
+
+function formatPercent(value: number) {
+  return `${(Math.round(value * 10) / 10).toFixed(1).replace(/\.0$/u, "")}%`;
+}
+
+function formatAbbreviatedTokenCount(value: number, divisor: number) {
+  return (Math.round((value / divisor) * 10) / 10).toFixed(1);
 }

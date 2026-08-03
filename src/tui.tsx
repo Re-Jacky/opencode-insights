@@ -2,12 +2,13 @@
 import { createTextAttributes, StyledText, type MouseEvent, type TextChunk, type TextRenderable } from "@opentui/core";
 import type { TuiPlugin, TuiPluginApi, TuiPluginModule } from "@opencode-ai/plugin/tui";
 import { createSignal, onCleanup } from "solid-js";
+import { readInsightsConfig } from "./capture.js";
 import {
   createMetricsState,
   recordAssistantDelta,
   recordAssistantMessage,
   recordToolActivity,
-  renderMetricsText
+  renderPromptRightMetricsText
 } from "./metrics.js";
 import {
   applySubagentEvent,
@@ -23,7 +24,7 @@ function isSessionID(value: string | undefined): value is string {
   return typeof value === "string" && value.startsWith("ses");
 }
 
-function PromptRight(props: {
+function PromptRightMetrics(props: {
   api: TuiPluginApi;
   sessionID: string;
   text: () => string;
@@ -36,12 +37,16 @@ function PromptRight(props: {
     const content = props.text();
     text.content = content;
     text.visible = content.length > 0;
-    text.height = content.length > 0 ? "auto" : 0;
+    text.height = content.length > 0 ? 1 : 0;
     props.api.renderer.requestRender();
   };
 
   const unsubscribe = props.subscribe(sync);
-  onCleanup(unsubscribe);
+  const timer = setInterval(sync, 1_000);
+  onCleanup(() => {
+    unsubscribe();
+    clearInterval(timer);
+  });
 
   return (
     <text
@@ -50,6 +55,10 @@ function PromptRight(props: {
         sync();
       }}
       fg={props.api.theme.current.textMuted}
+      height={1}
+      wrapMode="none"
+      truncate
+      overflow="hidden"
     >
       {props.text()}
     </text>
@@ -178,7 +187,8 @@ function textChunk(text: string, fg?: TextChunk["fg"], attributes?: number, bg?:
   };
 }
 
-const tui: TuiPlugin = async (api) => {
+const tui: TuiPlugin = async (api, options) => {
+  const config = await readInsightsConfig(options ?? {});
   const metrics = createMetricsState();
   const subagents = createSubagentState();
   const listeners = new Set<Listener>();
@@ -213,13 +223,19 @@ const tui: TuiPlugin = async (api) => {
       completedAt?: number;
       outputTokens?: number;
       reasoningTokens?: number;
+      inputTokens?: number;
+      cacheReadTokens?: number;
+      cacheWriteTokens?: number;
       finish?: string;
     } = {
       sessionID: info.sessionID ?? evt.properties.sessionID,
       messageID: info.id,
       createdAt: info.time.created,
+      inputTokens: info.tokens.input,
       outputTokens: info.tokens.output,
-      reasoningTokens: info.tokens.reasoning
+      reasoningTokens: info.tokens.reasoning,
+      cacheReadTokens: info.tokens.cache?.read,
+      cacheWriteTokens: info.tokens.cache?.write
     };
     if (typeof info.time.completed === "number") messageInput.completedAt = info.time.completed;
     if (typeof info.finish === "string") messageInput.finish = info.finish;
@@ -259,14 +275,17 @@ const tui: TuiPlugin = async (api) => {
   const offSlots = api.slots.register({
     slots: {
       session_prompt_right: (_ctx, props) => (
-        <PromptRight
+        <PromptRightMetrics
           api={api}
           sessionID={props.session_id}
           subscribe={subscribe}
           text={() => {
             if (!isSessionID(props.session_id)) return "";
             const status = api.state.session.status(props.session_id);
-            return renderMetricsText(metrics, props.session_id, { idle: status?.type === "idle" });
+            return renderPromptRightMetricsText(metrics, props.session_id, {
+              idle: status?.type === "idle",
+              metrics: config.promptRightMetrics
+            });
           }}
         />
       ),
