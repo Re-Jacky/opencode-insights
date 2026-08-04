@@ -2,9 +2,16 @@
 import { createTextAttributes, StyledText, type MouseEvent, type TextChunk, type TextRenderable } from "@opentui/core";
 import type { TuiPlugin, TuiPluginApi, TuiPluginModule } from "@opencode-ai/plugin/tui";
 import { createSignal, onCleanup } from "solid-js";
-import { readInsightsConfig } from "./capture.js";
+import { readInsightsConfig, type InsightsConfig } from "./capture.js";
 import { createListenerRegistry, type Listener } from "./listeners.js";
 import { hasRenderStateChanged } from "./render-state.js";
+import {
+  createGoUsageRefresher,
+  goUsageRows,
+  goUsageSectionVisible,
+  type GoUsageRow,
+  type GoUsageState
+} from "./go-usage.js";
 import {
   createMetricsState,
   recordAssistantDelta,
@@ -121,6 +128,97 @@ function TokenUsageSidebar(props: {
       {""}
     </text>
   );
+}
+
+function GoUsageSidebar(props: {
+  api: TuiPluginApi;
+  state: GoUsageState;
+  config: InsightsConfig;
+  usesGoProvider: boolean;
+  subscribe: (listener: Listener) => () => void;
+  goUsageSubscribe: (listener: Listener) => () => void;
+  refresh: () => void;
+}) {
+  let text: TextRenderable | undefined;
+  const [collapsed, setCollapsed] = createSignal(false);
+  const titleAttributes = createTextAttributes({ bold: true });
+  let previous: { content: string; visible: boolean; height: number | string } | undefined;
+
+  const toggle = (event: MouseEvent) => {
+    if (!text || event.y !== text.y) return;
+    setCollapsed((prev) => !prev);
+    sync();
+  };
+
+  const sync = () => {
+    if (!text) return;
+    const visible = goUsageSectionVisible(props.config, props.usesGoProvider);
+    if (visible) props.refresh();
+    const rows = visible ? goUsageRows(props.state, Date.now()) : undefined;
+    const error = props.state.error;
+    const showContent = visible && (rows || error);
+    const signature = showContent ? JSON.stringify({ collapsed: collapsed(), rows, error }) : "";
+    const next: { content: string; visible: boolean; height: number | "auto" } = {
+      content: signature,
+      visible: signature.length > 0,
+      height: signature.length > 0 ? "auto" : 0
+    };
+    if (!hasRenderStateChanged(previous, next)) return;
+    previous = next;
+    text.visible = next.visible;
+    text.height = next.height;
+    text.content = showContent ? renderGoUsageSidebar(rows, error, props.api, titleAttributes, collapsed()) : "";
+    props.api.renderer.requestRender();
+  };
+
+  const unsubscribe = props.subscribe(sync);
+  const unsubscribeGoUsage = props.goUsageSubscribe(sync);
+  const timer = setInterval(sync, 1_000);
+  onCleanup(() => {
+    unsubscribe();
+    unsubscribeGoUsage();
+    clearInterval(timer);
+  });
+
+  return (
+    <text
+      ref={(ref: TextRenderable) => {
+        text = ref;
+        sync();
+      }}
+      onMouseDown={toggle}
+      fg={props.api.theme.current.textMuted}
+    >
+      {""}
+    </text>
+  );
+}
+
+function renderGoUsageSidebar(
+  rows: GoUsageRow[] | undefined,
+  error: string | undefined,
+  api: TuiPluginApi,
+  titleAttributes: number,
+  collapsed: boolean
+) {
+  const chunks: TextChunk[] = [
+    textChunk(`${collapsed ? "▶" : "▼"} Go Usage\n`, api.theme.current.text, titleAttributes)
+  ];
+  if (!collapsed) {
+    if (rows && rows.length > 0) {
+      for (const [index, row] of rows.entries()) {
+        if (index > 0) chunks.push(textChunk("\n"));
+        const fill = Math.min(4, Math.ceil(row.usagePercent / 25));
+        const bar = "█".repeat(fill) + "░".repeat(4 - fill);
+        chunks.push(
+          textChunk(`  ${row.label.padEnd(7)}${row.usagePercent}% ${bar} ${row.reset}`, api.theme.current.textMuted)
+        );
+      }
+    } else if (error) {
+      chunks.push(textChunk(`Go usage: ${error}`, api.theme.current.error));
+    }
+  }
+  return new StyledText(chunks);
 }
 
 function SubagentSidebar(props: {
@@ -269,7 +367,15 @@ const tui: TuiPlugin = async (api, options) => {
   const subagents = createSubagentState();
   const metricListeners = createListenerRegistry();
   const subagentListeners = createListenerRegistry();
+  const goUsageListeners = createListenerRegistry();
   const hydratedSessions = new Set<string>();
+  const goProviderSessions = new Set<string>();
+  const goUsage = createGoUsageRefresher(config.goUsage);
+
+  const refreshGoUsage = async () => {
+    await goUsage.refresh();
+    goUsageListeners.notify();
+  };
 
   const hydrateSessionMetrics = async (sessionID: string) => {
     if (!isSessionID(sessionID) || hydratedSessions.has(sessionID)) return;
@@ -280,6 +386,8 @@ const tui: TuiPlugin = async (api, options) => {
       const messages = response.data ?? [];
       for (const message of messages) {
         const info = message.info;
+        const providerID = (info as { providerID?: unknown }).providerID;
+        if (providerID === "opencode-go") goProviderSessions.add(sessionID);
         if (info.role !== "assistant" || typeof info.time.completed !== "number") continue;
         const input = {
           sessionID: info.sessionID,
@@ -314,6 +422,9 @@ const tui: TuiPlugin = async (api, options) => {
   const offMessage = api.event.on("message.updated", (evt) => {
     const info = evt.properties.info;
     if (applySubagentEvent(subagents, evt)) subagentListeners.notify();
+    const sessionID = info.sessionID ?? evt.properties.sessionID;
+    const providerID = (info as { providerID?: unknown }).providerID;
+    if (providerID === "opencode-go" && sessionID) goProviderSessions.add(sessionID);
     if (info.role !== "assistant") return;
 
     const messageInput: {
@@ -397,6 +508,15 @@ const tui: TuiPlugin = async (api, options) => {
             state={metrics}
             subscribe={metricListeners.subscribe}
             hydrate={() => void hydrateSessionMetrics(props.session_id)}
+          />
+          <GoUsageSidebar
+            api={api}
+            state={goUsage.state}
+            config={config}
+            usesGoProvider={goProviderSessions.has(props.session_id)}
+            subscribe={metricListeners.subscribe}
+            goUsageSubscribe={goUsageListeners.subscribe}
+            refresh={() => void refreshGoUsage()}
           />
           <SubagentSidebar
             api={api}

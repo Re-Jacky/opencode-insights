@@ -32,7 +32,8 @@ describe("full-fidelity local capture", () => {
     cleanup.push(dataDir);
 
     await expect(readInsightsConfig({ dataDir })).resolves.toEqual({
-      promptRightMetrics: ["tps", "avg", "used", "cache"]
+      promptRightMetrics: ["tps", "avg", "used", "cache"],
+      goUsage: { enabled: false, cookie: "", workspaceID: "", refreshMs: 300_000 }
     });
     await expect(readFile(resolveInsightsConfigPath({ dataDir }), "utf8")).resolves.toContain('"promptRightMetrics"');
   });
@@ -46,7 +47,60 @@ describe("full-fidelity local capture", () => {
     );
 
     await expect(readInsightsConfig({ dataDir })).resolves.toEqual({
-      promptRightMetrics: ["used", "cache"]
+      promptRightMetrics: ["used", "cache"],
+      goUsage: { enabled: false, cookie: "", workspaceID: "", refreshMs: 300_000 }
+    });
+  });
+
+  test("defaults go usage to disabled when the config does not mention it", async () => {
+    const dataDir = await mkdtemp(join(tmpdir(), "opencode-insights-config-"));
+    cleanup.push(dataDir);
+
+    await expect(readInsightsConfig({ dataDir })).resolves.toMatchObject({
+      goUsage: { enabled: false, cookie: "", workspaceID: "" }
+    });
+  });
+
+  test("reads an enabled go usage configuration", async () => {
+    const dataDir = await mkdtemp(join(tmpdir(), "opencode-insights-config-"));
+    cleanup.push(dataDir);
+    await writeFile(
+      resolveInsightsConfigPath({ dataDir }),
+      JSON.stringify({
+        promptRightMetrics: ["tps", "used"],
+        goUsage: { enabled: true, cookie: "Fe26.2**abc", workspaceID: "wrk_1", refreshMs: 600_000 }
+      })
+    );
+
+    await expect(readInsightsConfig({ dataDir })).resolves.toEqual({
+      promptRightMetrics: ["tps", "used"],
+      goUsage: { enabled: true, cookie: "Fe26.2**abc", workspaceID: "wrk_1", refreshMs: 600_000 }
+    });
+  });
+
+  test("clamps the go usage refresh interval to at least one minute", async () => {
+    const dataDir = await mkdtemp(join(tmpdir(), "opencode-insights-config-"));
+    cleanup.push(dataDir);
+    await writeFile(
+      resolveInsightsConfigPath({ dataDir }),
+      JSON.stringify({ goUsage: { enabled: true, refreshMs: 1_000 } })
+    );
+
+    await expect(readInsightsConfig({ dataDir })).resolves.toMatchObject({
+      goUsage: { refreshMs: 60_000 }
+    });
+  });
+
+  test("falls back per-field when go usage values are invalid", async () => {
+    const dataDir = await mkdtemp(join(tmpdir(), "opencode-insights-config-"));
+    cleanup.push(dataDir);
+    await writeFile(
+      resolveInsightsConfigPath({ dataDir }),
+      JSON.stringify({ goUsage: { enabled: "yes", cookie: 42, workspaceID: "", refreshMs: "fast" } })
+    );
+
+    await expect(readInsightsConfig({ dataDir })).resolves.toMatchObject({
+      goUsage: { enabled: false, cookie: "", workspaceID: "", refreshMs: 300_000 }
     });
   });
 
