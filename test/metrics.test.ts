@@ -66,13 +66,13 @@ describe("metrics tracking", () => {
     });
 
     expect(renderResponseMetricsText(state, "ses_1")).toBe(
-      "10.4k used | 90% cache | 200 out | 50 think"
+      "10.4k used | 90.00% cache | 200 out | 50 think"
     );
     expect(renderPromptRightMetricsText(state, "ses_1", { idle: true })).toBe(
-      "TPS - | AVG - | 10.4k used | 90% cache"
+      "TPS - | AVG - | 10.4k used | 90.00% cache"
     );
     expect(renderPromptRightMetricsText(state, "ses_1", { idle: true, metrics: ["used", "cache"] })).toBe(
-      "10.4k used | 90% cache"
+      "10.4k used | 90.00% cache"
     );
   });
 

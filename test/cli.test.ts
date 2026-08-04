@@ -84,12 +84,12 @@ describe("cli helpers", () => {
     try {
       await writeFile(
         join(dir, "opencode.jsonc"),
-        JSON.stringify({ plugin: ["existing", ["@rejacky/opencode-insights", { dbPath: "/tmp/db.sqlite" }]] }),
+        '{\n  // Preserve this comment during uninstall.\n  "plugin": ["existing", ["@rejacky/opencode-insights", { "dbPath": "/tmp/db.sqlite" }]]\n}\n',
         "utf8"
       );
       await writeFile(
         join(dir, "tui.json"),
-        JSON.stringify({ plugin: ["@rejacky/opencode-insights", "@rejacky/opencode-insights/tui", "other-tui"] }),
+        '{\n  // Preserve this TUI comment during uninstall.\n  "plugin": ["@rejacky/opencode-insights", "@rejacky/opencode-insights/tui", "other-tui"]\n}\n',
         "utf8"
       );
       await writeFile(join(dataDir, "insights.sqlite"), "sqlite", "utf8");
@@ -105,9 +105,13 @@ describe("cli helpers", () => {
         keepData: false
       });
 
-      const opencode = JSON.parse(await readFile(join(dir, "opencode.jsonc"), "utf8")) as { plugin: string[] };
-      const tui = JSON.parse(await readFile(join(dir, "tui.json"), "utf8")) as { plugin: string[] };
+      const opencodeText = await readFile(join(dir, "opencode.jsonc"), "utf8");
+      const tuiText = await readFile(join(dir, "tui.json"), "utf8");
+      const opencode = JSON.parse(stripJsonCommentsAndTrailingCommas(opencodeText)) as { plugin: string[] };
+      const tui = JSON.parse(stripJsonCommentsAndTrailingCommas(tuiText)) as { plugin: string[] };
       expect(output).toContain("Uninstall cleanup complete");
+      expect(opencodeText).toContain("Preserve this comment");
+      expect(tuiText).toContain("Preserve this TUI comment");
       expect(opencode.plugin).toEqual(["existing"]);
       expect(tui.plugin).toEqual(["other-tui"]);
       await expect(readFile(join(dataDir, "insights.sqlite"), "utf8")).rejects.toThrow();
@@ -156,12 +160,12 @@ describe("cli helpers", () => {
       await writeFile(join(projectDir, "dist", "tui.js"), "", "utf8");
       await writeFile(
         join(dir, "opencode.jsonc"),
-        JSON.stringify({ plugin: ["existing", "@rejacky/opencode-insights"] }),
+        '{\n  // Keep this comment when debug updates the plugin.\n  "name": "project",\n  "plugin": ["existing", "@rejacky/opencode-insights",],\n}\n',
         "utf8"
       );
       await writeFile(
         join(dir, "tui.json"),
-        JSON.stringify({ plugin: ["@rejacky/opencode-insights/tui", "other-tui"] }),
+        '{\n  // Keep this TUI comment too.\n  "plugin": ["@rejacky/opencode-insights/tui", "other-tui"]\n}\n',
         "utf8"
       );
 
@@ -178,10 +182,14 @@ describe("cli helpers", () => {
 
       const localServerEntry = resolve("dist/index.js");
       const localTuiEntry = resolve("dist/tui.js");
-      const opencode = JSON.parse(await readFile(join(dir, "opencode.jsonc"), "utf8")) as { plugin: unknown[] };
-      const tui = JSON.parse(await readFile(join(dir, "tui.json"), "utf8")) as { plugin: string[] };
+      const opencodeText = await readFile(join(dir, "opencode.jsonc"), "utf8");
+      const tuiText = await readFile(join(dir, "tui.json"), "utf8");
+      const opencode = JSON.parse(stripJsonCommentsAndTrailingCommas(opencodeText)) as { plugin: unknown[] };
+      const tui = JSON.parse(stripJsonCommentsAndTrailingCommas(tuiText)) as { plugin: string[] };
       expect(output).toContain(localServerEntry);
       expect(output).toContain(localTuiEntry);
+      expect(opencodeText).toContain("Keep this comment");
+      expect(tuiText).toContain("Keep this TUI comment");
       expect(opencode.plugin).toEqual(["existing", [localServerEntry, { retentionDays: 2 }]]);
       expect(tui.plugin).toEqual(["other-tui", localTuiEntry]);
     } finally {

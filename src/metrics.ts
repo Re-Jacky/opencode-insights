@@ -309,7 +309,7 @@ function formatTokenCount(value: number) {
 }
 
 function formatPercent(value: number) {
-  return `${(Math.round(value * 10) / 10).toFixed(1).replace(/\.0$/u, "")}%`;
+  return `${(Math.round(value * 100) / 100).toFixed(2)}%`;
 }
 
 function formatAbbreviatedTokenCount(value: number, divisor: number) {

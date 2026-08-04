@@ -6,6 +6,7 @@ import { dirname, join, resolve } from "node:path";
 import { homedir } from "node:os";
 import { pathToFileURL } from "node:url";
 import { promisify } from "node:util";
+import { applyEdits, modify, parse, type ParseError } from "jsonc-parser";
 import { resolveCapturePath } from "./capture.js";
 import { buildRequestHistory, formatCaptureSummary, readRecentCaptures } from "./inspect.js";
 import { serveViewer } from "./viewer.js";
@@ -328,8 +329,10 @@ export async function configureOpenCodeDebug(options: CliOptions) {
     throw new Error("Missing dist output. Run npm run build before opencode-insights debug.");
   }
 
-  const opencodeConfig = await readJsonConfig(opencodePath, { plugin: [] });
-  const tuiConfig = await readJsonConfig(tuiPath, { plugin: [] });
+  const opencodeSource = await readJsonConfigSource(opencodePath);
+  const tuiSource = await readJsonConfigSource(tuiPath);
+  const opencodeConfig = await readJsonConfig(opencodePath, { plugin: [] }, opencodeSource);
+  const tuiConfig = await readJsonConfig(tuiPath, { plugin: [] }, tuiSource);
   setSinglePluginSpec(opencodeConfig, SERVER_PLUGIN_SPEC, [localServerEntry, debugServerOptions(options)], localServerEntry);
   setSinglePluginSpec(tuiConfig, TUI_PLUGIN_SPEC, localTuiEntry);
   removePlugin(tuiConfig, SUBPATH_TUI_PLUGIN_SPEC);
@@ -349,8 +352,8 @@ export async function configureOpenCodeDebug(options: CliOptions) {
   }
 
   await mkdir(configDir, { recursive: true });
-  await writeJsonConfig(opencodePath, opencodeConfig);
-  await writeJsonConfig(tuiPath, tuiConfig);
+  await writeJsonConfig(opencodePath, opencodeConfig, opencodeSource);
+  await writeJsonConfig(tuiPath, tuiConfig, tuiSource);
   lines.push("Debug configuration written. Restart OpenCode to load the local build.");
   return lines.join("\n");
 }
@@ -370,17 +373,23 @@ export function resolveOpenCodeConfigPath(configDir: string) {
   return jsonPath;
 }
 
-async function readJsonConfig(path: string, fallback: JsonObject) {
-  if (!existsSync(path)) return { ...fallback };
-  const content = await readFile(path, "utf8");
+async function readJsonConfig(path: string, fallback: JsonObject, source?: string) {
+  const content = source ?? (existsSync(path) ? await readFile(path, "utf8") : undefined);
+  if (content === undefined) return { ...fallback };
   const trimmed = content.trim();
   if (!trimmed) return { ...fallback };
   try {
-    const parsed = JSON.parse(stripJsonCommentsAndTrailingCommas(trimmed)) as unknown;
+    const parseErrors: ParseError[] = [];
+    const parsed = parse(trimmed, parseErrors, { allowTrailingComma: true }) as unknown;
+    if (parseErrors.length > 0) throw new Error("invalid JSONC syntax");
     return isJsonObject(parsed) ? parsed : { ...fallback };
   } catch (error) {
     throw new Error(`Could not parse ${path}: ${error instanceof Error ? error.message : String(error)}`);
   }
+}
+
+async function readJsonConfigSource(path: string) {
+  return existsSync(path) ? readFile(path, "utf8") : undefined;
 }
 
 export function stripJsonCommentsAndTrailingCommas(input: string) {
@@ -510,11 +519,12 @@ export async function uninstallOpenCode(options: CliOptions) {
 
 async function removePluginFromConfig(path: string, plugin: string, options: CliOptions) {
   if (!existsSync(path)) return "config not found";
-  const config = await readJsonConfig(path, { plugin: [] });
+  const source = await readJsonConfigSource(path);
+  const config = await readJsonConfig(path, { plugin: [] }, source);
   const changed = removePlugin(config, plugin);
   if (!changed) return `not present (${plugin})`;
   if (options.dryRun) return `would remove (${plugin})`;
-  await writeJsonConfig(path, config);
+  await writeJsonConfig(path, config, source);
   return `removed (${plugin})`;
 }
 
@@ -528,8 +538,15 @@ async function removeDataFiles(paths: string[], options: CliOptions) {
   return existing;
 }
 
-async function writeJsonConfig(path: string, config: JsonObject) {
+async function writeJsonConfig(path: string, config: JsonObject, source?: string) {
   await mkdir(dirname(path), { recursive: true });
+  if (source !== undefined) {
+    const edits = modify(source, ["plugin"], config.plugin, {
+      formattingOptions: { insertSpaces: true, tabSize: 2, eol: "\n" }
+    });
+    await writeFile(path, applyEdits(source, edits), "utf8");
+    return;
+  }
   await writeFile(path, `${JSON.stringify(config, null, 2)}\n`, "utf8");
 }
 

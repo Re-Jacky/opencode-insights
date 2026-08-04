@@ -3,6 +3,8 @@ import { createTextAttributes, StyledText, type MouseEvent, type TextChunk, type
 import type { TuiPlugin, TuiPluginApi, TuiPluginModule } from "@opencode-ai/plugin/tui";
 import { createSignal, onCleanup } from "solid-js";
 import { readInsightsConfig } from "./capture.js";
+import { createListenerRegistry, type Listener } from "./listeners.js";
+import { hasRenderStateChanged } from "./render-state.js";
 import {
   createMetricsState,
   recordAssistantDelta,
@@ -18,8 +20,6 @@ import {
   type SubagentState
 } from "./subagents.js";
 
-type Listener = () => void;
-
 function isSessionID(value: string | undefined): value is string {
   return typeof value === "string" && value.startsWith("ses");
 }
@@ -31,13 +31,17 @@ function PromptRightMetrics(props: {
   subscribe: (listener: Listener) => () => void;
 }) {
   let text: TextRenderable | undefined;
+  let previous: { content: string; visible: boolean; height: number | string } | undefined;
 
   const sync = () => {
     if (!text) return;
     const content = props.text();
-    text.content = content;
-    text.visible = content.length > 0;
-    text.height = content.length > 0 ? 1 : 0;
+    const next = { content, visible: content.length > 0, height: content.length > 0 ? 1 : 0 };
+    if (!hasRenderStateChanged(previous, next)) return;
+    previous = next;
+    text.content = next.content;
+    text.visible = next.visible;
+    text.height = next.height;
     props.api.renderer.requestRender();
   };
 
@@ -75,11 +79,12 @@ function SubagentSidebar(props: {
   const [collapsed, setCollapsed] = createSignal(false);
   const [hoveredRowID, setHoveredRowID] = createSignal<string | undefined>();
   const titleAttributes = createTextAttributes({ bold: true });
+  let previous: { content: string; visible: boolean; height: number | string } | undefined;
 
   const toggle = (event: MouseEvent) => {
     if (!text || event.y !== text.y) return;
     setCollapsed((prev) => !prev);
-    props.api.renderer.requestRender();
+    sync();
   };
 
   const openSubagent = (event: MouseEvent) => {
@@ -110,11 +115,19 @@ function SubagentSidebar(props: {
   const sync = () => {
     if (!text) return;
     const model = getSubagentSidebarModel(props.state, props.sessionID);
-    text.visible = !!model;
-    text.height = model ? "auto" : 0;
-    text.content = model
-      ? renderSubagentStyledSidebar(props.state, props.sessionID, props.api, titleAttributes, collapsed(), hoveredRowID())
+    const content = model
+      ? renderSubagentStyledSidebar(model, props.api, titleAttributes, collapsed(), hoveredRowID())
       : "";
+    const next: { content: string; visible: boolean; height: number | "auto" } = {
+      content: model ? contentSignature(model, collapsed(), hoveredRowID()) : "",
+      visible: !!model,
+      height: model ? "auto" : 0
+    };
+    if (!hasRenderStateChanged(previous, next)) return;
+    previous = next;
+    text.visible = next.visible;
+    text.height = next.height;
+    text.content = model ? content : "";
     props.api.renderer.requestRender();
   };
 
@@ -143,16 +156,12 @@ function SubagentSidebar(props: {
 }
 
 function renderSubagentStyledSidebar(
-  state: SubagentState,
-  sessionID: string,
+  model: NonNullable<ReturnType<typeof getSubagentSidebarModel>>,
   api: TuiPluginApi,
   titleAttributes: number,
   collapsed: boolean,
   hoveredRowID?: string
 ) {
-  const model = getSubagentSidebarModel(state, sessionID);
-  if (!model) return "";
-
   const indicator = collapsed ? "▶ " : "▼ ";
   const chunks: TextChunk[] = [
     textChunk(`${indicator}${model.title}\n`, api.theme.current.text, titleAttributes),
@@ -177,6 +186,10 @@ function renderSubagentStyledSidebar(
   return new StyledText(chunks);
 }
 
+function contentSignature(model: NonNullable<ReturnType<typeof getSubagentSidebarModel>>, collapsed: boolean, hoveredRowID?: string) {
+  return JSON.stringify({ collapsed, hoveredRowID, title: model.title, summary: model.summary, rows: model.rows });
+}
+
 function textChunk(text: string, fg?: TextChunk["fg"], attributes?: number, bg?: TextChunk["bg"]): TextChunk {
   return {
     __isChunk: true,
@@ -191,14 +204,8 @@ const tui: TuiPlugin = async (api, options) => {
   const config = await readInsightsConfig(options ?? {});
   const metrics = createMetricsState();
   const subagents = createSubagentState();
-  const listeners = new Set<Listener>();
-  const bump = () => {
-    for (const listener of listeners) listener();
-  };
-  const subscribe = (listener: Listener) => {
-    listeners.add(listener);
-    return () => listeners.delete(listener);
-  };
+  const metricListeners = createListenerRegistry();
+  const subagentListeners = createListenerRegistry();
 
   const offDelta = api.event.on("message.part.delta", (evt) => {
     if (evt.properties.field !== "text") return;
@@ -208,12 +215,12 @@ const tui: TuiPlugin = async (api, options) => {
       delta: evt.properties.delta,
       at: Date.now()
     });
-    bump();
+    metricListeners.notify();
   });
 
   const offMessage = api.event.on("message.updated", (evt) => {
     const info = evt.properties.info;
-    if (applySubagentEvent(subagents, evt)) bump();
+    if (applySubagentEvent(subagents, evt)) subagentListeners.notify();
     if (info.role !== "assistant") return;
 
     const messageInput: {
@@ -240,7 +247,7 @@ const tui: TuiPlugin = async (api, options) => {
     if (typeof info.time.completed === "number") messageInput.completedAt = info.time.completed;
     if (typeof info.finish === "string") messageInput.finish = info.finish;
     recordAssistantMessage(metrics, messageInput);
-    bump();
+    metricListeners.notify();
   });
 
   const offPart = api.event.on("message.part.updated", (evt) => {
@@ -248,28 +255,28 @@ const tui: TuiPlugin = async (api, options) => {
     if (part.type === "tool") {
       recordToolActivity(metrics, part.sessionID ?? evt.properties.sessionID, part.messageID, Date.now());
     }
-    applySubagentEvent(subagents, evt);
-    bump();
+    if (applySubagentEvent(subagents, evt)) subagentListeners.notify();
+    metricListeners.notify();
   });
 
   const offSessionCreated = api.event.on("session.created", (evt) => {
-    if (applySubagentEvent(subagents, evt)) bump();
+    if (applySubagentEvent(subagents, evt)) subagentListeners.notify();
   });
 
   const offSessionUpdated = api.event.on("session.updated", (evt) => {
-    if (applySubagentEvent(subagents, evt)) bump();
+    if (applySubagentEvent(subagents, evt)) subagentListeners.notify();
   });
 
   const offSessionStatus = api.event.on("session.status", (evt) => {
-    if (applySubagentEvent(subagents, evt)) bump();
+    if (applySubagentEvent(subagents, evt)) subagentListeners.notify();
   });
 
   const offSessionIdle = api.event.on("session.idle", (evt) => {
-    if (applySubagentEvent(subagents, evt)) bump();
+    if (applySubagentEvent(subagents, evt)) subagentListeners.notify();
   });
 
   const offSessionError = api.event.on("session.error", (evt) => {
-    if (applySubagentEvent(subagents, evt)) bump();
+    if (applySubagentEvent(subagents, evt)) subagentListeners.notify();
   });
 
   const offSlots = api.slots.register({
@@ -278,7 +285,7 @@ const tui: TuiPlugin = async (api, options) => {
         <PromptRightMetrics
           api={api}
           sessionID={props.session_id}
-          subscribe={subscribe}
+          subscribe={metricListeners.subscribe}
           text={() => {
             if (!isSessionID(props.session_id)) return "";
             const status = api.state.session.status(props.session_id);
@@ -294,7 +301,7 @@ const tui: TuiPlugin = async (api, options) => {
           api={api}
           sessionID={props.session_id}
           state={subagents}
-          subscribe={subscribe}
+          subscribe={subagentListeners.subscribe}
         />
       )
     }
