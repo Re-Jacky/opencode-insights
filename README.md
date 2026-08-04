@@ -92,10 +92,13 @@ The `uninstall` command removes plugin config entries and local Insights data; i
 ## What You Get
 
 - Configurable live metrics in the OpenCode session prompt zone.
+- A collapsible session-wide `Token Usage` sidebar showing total tokens, response count, input/output/reasoning usage, cache read/write usage, and aggregate cache rate. It loads completed responses already present in the session and continues updating live.
 - Subagent status (running, done, failed, elapsed time, and token/context usage) in the sidebar.
 - Local capture of OpenCode hook/event data without redaction.
 - A local web viewer for reconstructed sessions, user turns, hidden request context, system/messages transforms, and assistant thinking/response sequences.
 - Native OpenCode footer components (project directory and version) remain visible — the plugin does not override `sidebar_footer` or `home_prompt_right` slots.
+
+The right sidebar contains two independent plugin sections: `Token Usage` and `Subagents`. Click either section header to collapse or expand it. Token usage is aggregated across the full session; prompt-right `used` and `cache` values continue to represent the latest completed assistant response.
 
 ## TUI Metrics Configuration
 
