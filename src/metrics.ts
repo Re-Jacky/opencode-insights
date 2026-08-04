@@ -28,6 +28,16 @@ export type AssistantResponseUsage = {
   finish?: string | undefined;
 };
 
+export type SessionTokenUsage = {
+  inputTokens: number;
+  outputTokens: number;
+  reasoningTokens: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
+  totalTokens: number;
+  responseCount: number;
+};
+
 export type PromptRightMetric = "tps" | "avg" | "ttft" | "used" | "cache" | "input" | "output" | "reasoning";
 
 export const DEFAULT_PROMPT_RIGHT_METRICS: PromptRightMetric[] = ["tps", "avg", "used", "cache"];
@@ -37,6 +47,8 @@ export type MetricsState = {
   messageTimingByID: Record<string, MessageTiming>;
   sessionAverageByID: Record<string, SessionAverage>;
   latestResponseUsageBySession: Record<string, AssistantResponseUsage>;
+  responseUsageByMessageID: Record<string, { sessionID: string; usage: AssistantResponseUsage }>;
+  sessionTokenUsageByID: Record<string, SessionTokenUsage>;
 };
 
 const STREAM_WINDOW_MS = 5_000;
@@ -48,7 +60,9 @@ export function createMetricsState(): MetricsState {
     streamSamplesBySession: {},
     messageTimingByID: {},
     sessionAverageByID: {},
-    latestResponseUsageBySession: {}
+    latestResponseUsageBySession: {},
+    responseUsageByMessageID: {},
+    sessionTokenUsageByID: {}
   };
 }
 
@@ -92,7 +106,11 @@ export function recordAssistantMessage(
     cacheWriteTokens: input.cacheWriteTokens,
     finish: input.finish
   });
-  if (hasTokenUsage(usage)) state.latestResponseUsageBySession[input.sessionID] = usage;
+  if (hasTokenUsage(usage)) {
+    state.latestResponseUsageBySession[input.sessionID] = usage;
+    state.responseUsageByMessageID[input.messageID] = { sessionID: input.sessionID, usage };
+    rebuildSessionTokenUsage(state, input.sessionID);
+  }
 
   const timing = state.messageTimingByID[input.messageID];
   if (timing?.sessionID === input.sessionID && typeof timing.firstResponseAt === "number") {
@@ -209,12 +227,59 @@ export function renderPromptRightMetricsText(
   return (options.metrics?.length ? options.metrics : DEFAULT_PROMPT_RIGHT_METRICS).map((metric) => values[metric]).join(" | ");
 }
 
+export function getSessionTokenUsage(state: MetricsState, sessionID: string) {
+  return state.sessionTokenUsageByID[sessionID];
+}
+
+export function renderSessionTokenUsage(state: MetricsState, sessionID: string) {
+  const usage = getSessionTokenUsage(state, sessionID);
+  if (!usage) return "";
+
+  const cachePromptTokens = usage.inputTokens + usage.cacheReadTokens;
+  const cacheRate = cachePromptTokens > 0 ? (usage.cacheReadTokens / cachePromptTokens) * 100 : undefined;
+  return [
+    "Token Usage",
+    `${formatTokenCount(usage.totalTokens)} total · ${usage.responseCount} responses`,
+    `${formatTokenCount(usage.inputTokens)} input`,
+    `${formatTokenCount(usage.outputTokens)} output`,
+    `${formatTokenCount(usage.reasoningTokens)} reasoning`,
+    `${formatTokenCount(usage.cacheReadTokens)} cache read`,
+    `${formatTokenCount(usage.cacheWriteTokens)} cache write`,
+    `${cacheRate === undefined ? "-" : formatPercent(cacheRate)} cache rate`
+  ].join("\n");
+}
+
 function pruneSamples(state: MetricsState, now = Date.now()) {
   for (const [sessionID, samples] of Object.entries(state.streamSamplesBySession)) {
     const next = samples.filter((sample) => now - sample.at <= STREAM_WINDOW_MS);
     if (next.length > 0) state.streamSamplesBySession[sessionID] = next;
     else delete state.streamSamplesBySession[sessionID];
   }
+}
+
+function rebuildSessionTokenUsage(state: MetricsState, sessionID: string) {
+  const usage: SessionTokenUsage = {
+    inputTokens: 0,
+    outputTokens: 0,
+    reasoningTokens: 0,
+    cacheReadTokens: 0,
+    cacheWriteTokens: 0,
+    totalTokens: 0,
+    responseCount: 0
+  };
+
+  for (const response of Object.values(state.responseUsageByMessageID)) {
+    if (response.sessionID !== sessionID) continue;
+    usage.inputTokens += response.usage.inputTokens ?? 0;
+    usage.outputTokens += response.usage.outputTokens ?? 0;
+    usage.reasoningTokens += response.usage.reasoningTokens ?? 0;
+    usage.cacheReadTokens += response.usage.cacheReadTokens ?? 0;
+    usage.cacheWriteTokens += response.usage.cacheWriteTokens ?? 0;
+    usage.responseCount += 1;
+  }
+
+  usage.totalTokens = usage.inputTokens + usage.outputTokens + usage.reasoningTokens + usage.cacheReadTokens + usage.cacheWriteTokens;
+  state.sessionTokenUsageByID[sessionID] = usage;
 }
 
 function sessionAverage(state: MetricsState, sessionID: string) {

@@ -33,4 +33,14 @@ describe("plugin entrypoints", () => {
     expect(source).toContain("onMouseOut={clearHoveredSubagent}");
     expect(source).toContain("api.theme.current.backgroundElement");
   });
+
+  test("renders session-wide token usage in the sidebar", () => {
+    const source = readFileSync(new URL("../src/tui.tsx", import.meta.url), "utf8");
+
+    expect(source).toContain("function TokenUsageSidebar");
+    expect(source).toContain("renderSessionTokenUsage");
+    expect(source).toContain("api.client.session.messages");
+    expect(source).toContain("toggleTokenUsage");
+    expect(source).toContain("onMouseDown={toggleTokenUsage}");
+  });
 });

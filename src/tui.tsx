@@ -10,7 +10,9 @@ import {
   recordAssistantDelta,
   recordAssistantMessage,
   recordToolActivity,
-  renderPromptRightMetricsText
+  renderPromptRightMetricsText,
+  renderSessionTokenUsage,
+  type MetricsState
 } from "./metrics.js";
 import {
   applySubagentEvent,
@@ -65,6 +67,58 @@ function PromptRightMetrics(props: {
       overflow="hidden"
     >
       {props.text()}
+    </text>
+  );
+}
+
+function TokenUsageSidebar(props: {
+  api: TuiPluginApi;
+  sessionID: string;
+  state: MetricsState;
+  subscribe: (listener: Listener) => () => void;
+  hydrate: () => void;
+}) {
+  let text: TextRenderable | undefined;
+  let previous: { content: string; visible: boolean; height: number | string } | undefined;
+  const [collapsed, setCollapsed] = createSignal(false);
+  const titleAttributes = createTextAttributes({ bold: true });
+
+  const toggleTokenUsage = (event: MouseEvent) => {
+    if (!text || event.y !== text.y) return;
+    setCollapsed((prev) => !prev);
+    sync();
+  };
+
+  const sync = () => {
+    if (!text) return;
+    const content = renderSessionTokenUsage(props.state, props.sessionID);
+    const next: { content: string; visible: boolean; height: number | "auto" } = {
+      content: `${collapsed()}|${content}`,
+      visible: content.length > 0,
+      height: content.length > 0 ? "auto" : 0
+    };
+    if (!hasRenderStateChanged(previous, next)) return;
+    previous = next;
+    text.visible = next.visible;
+    text.height = next.height;
+    text.content = content ? renderTokenUsageSidebar(content, props.api, titleAttributes, collapsed()) : "";
+    props.api.renderer.requestRender();
+  };
+
+  const unsubscribe = props.subscribe(sync);
+  onCleanup(unsubscribe);
+  props.hydrate();
+
+  return (
+    <text
+      ref={(ref: TextRenderable) => {
+        text = ref;
+        sync();
+      }}
+      onMouseDown={toggleTokenUsage}
+      fg={props.api.theme.current.textMuted}
+    >
+      {""}
     </text>
   );
 }
@@ -186,6 +240,15 @@ function renderSubagentStyledSidebar(
   return new StyledText(chunks);
 }
 
+function renderTokenUsageSidebar(content: string, api: TuiPluginApi, titleAttributes: number, collapsed: boolean) {
+  const [title, ...details] = content.split("\n");
+  const visibleDetails = collapsed ? details.slice(0, 1) : details;
+  return new StyledText([
+    textChunk(`${collapsed ? "▶" : "▼"} ${title}\n`, api.theme.current.text, titleAttributes),
+    textChunk(visibleDetails.join("\n"), api.theme.current.textMuted)
+  ]);
+}
+
 function contentSignature(model: NonNullable<ReturnType<typeof getSubagentSidebarModel>>, collapsed: boolean, hoveredRowID?: string) {
   return JSON.stringify({ collapsed, hoveredRowID, title: model.title, summary: model.summary, rows: model.rows });
 }
@@ -206,6 +269,36 @@ const tui: TuiPlugin = async (api, options) => {
   const subagents = createSubagentState();
   const metricListeners = createListenerRegistry();
   const subagentListeners = createListenerRegistry();
+  const hydratedSessions = new Set<string>();
+
+  const hydrateSessionMetrics = async (sessionID: string) => {
+    if (!isSessionID(sessionID) || hydratedSessions.has(sessionID)) return;
+    hydratedSessions.add(sessionID);
+
+    try {
+      const response = await api.client.session.messages({ sessionID });
+      const messages = response.data ?? [];
+      for (const message of messages) {
+        const info = message.info;
+        if (info.role !== "assistant" || typeof info.time.completed !== "number") continue;
+        const input = {
+          sessionID: info.sessionID,
+          messageID: info.id,
+          createdAt: info.time.created,
+          completedAt: info.time.completed,
+          inputTokens: info.tokens.input,
+          outputTokens: info.tokens.output,
+          reasoningTokens: info.tokens.reasoning,
+          cacheReadTokens: info.tokens.cache.read,
+          cacheWriteTokens: info.tokens.cache.write
+        };
+        recordAssistantMessage(metrics, typeof info.finish === "string" ? { ...input, finish: info.finish } : input);
+      }
+      metricListeners.notify();
+    } catch {
+      hydratedSessions.delete(sessionID);
+    }
+  };
 
   const offDelta = api.event.on("message.part.delta", (evt) => {
     if (evt.properties.field !== "text") return;
@@ -297,12 +390,21 @@ const tui: TuiPlugin = async (api, options) => {
         />
       ),
       sidebar_content: (_ctx, props) => (
-        <SubagentSidebar
-          api={api}
-          sessionID={props.session_id}
-          state={subagents}
-          subscribe={subagentListeners.subscribe}
-        />
+        <>
+          <TokenUsageSidebar
+            api={api}
+            sessionID={props.session_id}
+            state={metrics}
+            subscribe={metricListeners.subscribe}
+            hydrate={() => void hydrateSessionMetrics(props.session_id)}
+          />
+          <SubagentSidebar
+            api={api}
+            sessionID={props.session_id}
+            state={subagents}
+            subscribe={subagentListeners.subscribe}
+          />
+        </>
       )
     }
   });
