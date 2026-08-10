@@ -6,6 +6,7 @@ import { readInsightsConfig, type InsightsConfig } from "./capture.js";
 import { createListenerRegistry, type Listener } from "./listeners.js";
 import { hasRenderStateChanged } from "./render-state.js";
 import {
+  createGoProviderTracker,
   createGoUsageRefresher,
   formatGoUsageRow,
   goUsageRows,
@@ -135,7 +136,8 @@ function GoUsageSidebar(props: {
   api: TuiPluginApi;
   state: GoUsageState;
   config: InsightsConfig;
-  usesGoProvider: boolean;
+  tracker: ReturnType<typeof createGoProviderTracker>;
+  sessionID: string;
   subscribe: (listener: Listener) => () => void;
   goUsageSubscribe: (listener: Listener) => () => void;
   refresh: () => void;
@@ -153,7 +155,7 @@ function GoUsageSidebar(props: {
 
   const sync = () => {
     if (!text) return;
-    const visible = goUsageSectionVisible(props.config, props.usesGoProvider);
+    const visible = goUsageSectionVisible(props.config, props.tracker.usesOpenCodeGo(props.sessionID));
     if (visible) props.refresh();
     const rows = visible ? goUsageRows(props.state, Date.now()) : undefined;
     const error = props.state.error;
@@ -366,7 +368,7 @@ const tui: TuiPlugin = async (api, options) => {
   const subagentListeners = createListenerRegistry();
   const goUsageListeners = createListenerRegistry();
   const hydratedSessions = new Set<string>();
-  const goProviderSessions = new Set<string>();
+  const goProviderTracker = createGoProviderTracker();
   const goUsage = createGoUsageRefresher(config.goUsage);
 
   const refreshGoUsage = async () => {
@@ -383,7 +385,7 @@ const tui: TuiPlugin = async (api, options) => {
       for (const message of messages) {
         const info = message.info;
         const providerID = (info as { providerID?: unknown }).providerID;
-        if (providerID === "opencode-go") goProviderSessions.add(sessionID);
+        goProviderTracker.record(sessionID, typeof providerID === "string" ? providerID : undefined);
         if (info.role !== "assistant" || typeof info.time.completed !== "number") continue;
         const input = {
           sessionID: info.sessionID,
@@ -419,8 +421,9 @@ const tui: TuiPlugin = async (api, options) => {
     const info = evt.properties.info;
     if (applySubagentEvent(subagents, evt)) subagentListeners.notify();
     const sessionID = info.sessionID ?? evt.properties.sessionID;
-    const providerID = (info as { providerID?: unknown }).providerID;
-    if (providerID === "opencode-go" && sessionID) goProviderSessions.add(sessionID);
+    const providerID =
+      (info as { providerID?: unknown }).providerID ?? (info as { model?: { providerID?: unknown } }).model?.providerID;
+    goProviderTracker.record(sessionID, typeof providerID === "string" ? providerID : undefined);
     if (info.role !== "assistant") return;
 
     const messageInput: {
@@ -465,6 +468,13 @@ const tui: TuiPlugin = async (api, options) => {
 
   const offSessionUpdated = api.event.on("session.updated", (evt) => {
     if (applySubagentEvent(subagents, evt)) subagentListeners.notify();
+    const info = evt.properties.info as { id?: unknown; model?: { providerID?: unknown } } | undefined;
+    const sessionID = typeof info?.id === "string" ? info.id : undefined;
+    const providerID = info?.model?.providerID;
+    if (sessionID && typeof providerID === "string") {
+      goProviderTracker.record(sessionID, providerID);
+      metricListeners.notify();
+    }
   });
 
   const offSessionStatus = api.event.on("session.status", (evt) => {
@@ -509,7 +519,8 @@ const tui: TuiPlugin = async (api, options) => {
             api={api}
             state={goUsage.state}
             config={config}
-            usesGoProvider={goProviderSessions.has(props.session_id)}
+            tracker={goProviderTracker}
+            sessionID={props.session_id}
             subscribe={metricListeners.subscribe}
             goUsageSubscribe={goUsageListeners.subscribe}
             refresh={() => void refreshGoUsage()}

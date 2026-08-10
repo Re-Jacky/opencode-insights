@@ -2,6 +2,7 @@ import { readFile } from "node:fs/promises";
 import { describe, expect, test } from "vitest";
 import {
   GoUsageError,
+  createGoProviderTracker,
   createGoUsageRefresher,
   fetchGoUsage,
   formatGoUsageRow,
@@ -48,6 +49,37 @@ describe("goUsageRows", () => {
     const rows = goUsageRows(state, 10_000 + 60_000);
     expect(rows?.[0]?.reset).toBe("2h 32m");
     expect(rows?.[0]?.usagePercent).toBe(12);
+  });
+});
+
+describe("createGoProviderTracker", () => {
+  test("tracks the latest provider per session so switching away hides go usage", () => {
+    const tracker = createGoProviderTracker();
+    tracker.record("ses_1", "opencode-go");
+    expect(tracker.usesOpenCodeGo("ses_1")).toBe(true);
+    tracker.record("ses_1", "openai");
+    expect(tracker.usesOpenCodeGo("ses_1")).toBe(false);
+  });
+
+  test("shows go usage after switching from another provider", () => {
+    const tracker = createGoProviderTracker();
+    tracker.record("ses_1", "openai");
+    expect(tracker.usesOpenCodeGo("ses_1")).toBe(false);
+    tracker.record("ses_1", "opencode-go");
+    expect(tracker.usesOpenCodeGo("ses_1")).toBe(true);
+  });
+
+  test("keeps the previous provider when an event carries none", () => {
+    const tracker = createGoProviderTracker();
+    tracker.record("ses_1", "opencode-go");
+    tracker.record("ses_1", undefined);
+    expect(tracker.usesOpenCodeGo("ses_1")).toBe(true);
+  });
+
+  test("does not claim go usage for unknown sessions", () => {
+    const tracker = createGoProviderTracker();
+    tracker.record("ses_1", "opencode-go");
+    expect(tracker.usesOpenCodeGo("ses_2")).toBe(false);
   });
 });
 

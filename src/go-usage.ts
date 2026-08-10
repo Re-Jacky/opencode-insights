@@ -81,6 +81,18 @@ export function goUsageSectionVisible(config: InsightsConfig, usesGoProvider: bo
   );
 }
 
+export function createGoProviderTracker() {
+  const providers = new Map<string, string>();
+  return {
+    record(sessionID: string, providerID: string | undefined) {
+      if (providerID) providers.set(sessionID, providerID);
+    },
+    usesOpenCodeGo(sessionID: string) {
+      return providers.get(sessionID) === "opencode-go";
+    }
+  };
+}
+
 export type GoUsageState = {
   data?: GoUsage | undefined;
   error?: string | undefined;
