@@ -66,9 +66,21 @@ export function formatReset(seconds: number): string {
   return `${minutes}m`;
 }
 
+const BLOCK_PARTIALS = ["", "▏", "▎", "▍", "▌", "▋", "▊", "▉"];
+
+export function formatUsageBar(usagePercent: number, width = 10): string {
+  const percent = Math.max(0, Math.min(100, usagePercent));
+  const steps = width * 8;
+  const filled = Math.min(steps, Math.max(0, Math.round((percent / 100) * steps)));
+  const full = Math.floor(filled / 8);
+  const remainder = filled % 8;
+  const partial = BLOCK_PARTIALS[remainder] ?? "";
+  const empty = Math.max(0, width - full - (partial.length > 0 ? 1 : 0));
+  return "█".repeat(full) + partial + "░".repeat(empty);
+}
+
 export function formatGoUsageRow(row: GoUsageRow): string {
-  const fill = Math.min(4, Math.ceil(row.usagePercent / 25));
-  const bar = "█".repeat(fill) + "░".repeat(4 - fill);
+  const bar = formatUsageBar(row.usagePercent);
   return `${row.label.padEnd(9)}${`${row.usagePercent}%`.padEnd(3)} ${bar} ${row.reset}`;
 }
 

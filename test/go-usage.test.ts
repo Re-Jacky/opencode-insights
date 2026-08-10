@@ -7,6 +7,7 @@ import {
   fetchGoUsage,
   formatGoUsageRow,
   formatReset,
+  formatUsageBar,
   goUsageRows,
   goUsageSectionVisible,
   parseGoUsageHtml
@@ -250,25 +251,53 @@ describe("formatReset", () => {
   });
 });
 
+describe("formatUsageBar", () => {
+  test("renders an empty bar at zero percent", () => {
+    expect(formatUsageBar(0)).toBe("░░░░░░░░░░");
+  });
+
+  test("renders a sliver for one percent", () => {
+    expect(formatUsageBar(1)).toBe("▏░░░░░░░░░");
+  });
+
+  test("renders partial blocks for fractional step counts", () => {
+    expect(formatUsageBar(12)).toBe("█▎░░░░░░░░");
+    expect(formatUsageBar(27)).toBe("██▊░░░░░░░");
+  });
+
+  test("renders a half-filled bar at fifty percent", () => {
+    expect(formatUsageBar(50)).toBe("█████░░░░░");
+  });
+
+  test("fills the bar completely at and above one hundred percent", () => {
+    expect(formatUsageBar(100)).toBe("██████████");
+    expect(formatUsageBar(150)).toBe("██████████");
+  });
+
+  test("honors a custom width", () => {
+    expect(formatUsageBar(50, 4)).toBe("██░░");
+  });
+});
+
 describe("formatGoUsageRow", () => {
   test("aligns label, percentage, bar and reset with generous spacing", () => {
     expect(formatGoUsageRow({ label: "Rolling", usagePercent: 12, reset: "2h 33m" })).toBe(
-      "Rolling  12% █░░░ 2h 33m"
+      "Rolling  12% █▎░░░░░░░░ 2h 33m"
     );
   });
 
   test("keeps the percentage column aligned for single and double digit values", () => {
     expect(formatGoUsageRow({ label: "Weekly", usagePercent: 11, reset: "5d 15h" })).toBe(
-      "Weekly   11% █░░░ 5d 15h"
+      "Weekly   11% █▏░░░░░░░░ 5d 15h"
     );
     expect(formatGoUsageRow({ label: "Monthly", usagePercent: 27, reset: "1d 17h" })).toBe(
-      "Monthly  27% ██░░ 1d 17h"
+      "Monthly  27% ██▊░░░░░░░ 1d 17h"
     );
   });
 
   test("fills the bar completely at 100 percent", () => {
     expect(formatGoUsageRow({ label: "Rolling", usagePercent: 100, reset: "0m" })).toBe(
-      "Rolling  100% ████ 0m"
+      "Rolling  100% ██████████ 0m"
     );
   });
 });
