@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -15,20 +15,30 @@ describe("plugin startup", () => {
   test("initializes local storage on load", async () => {
     const dir = await mkdtemp(join(tmpdir(), "opencode-insights-plugin-"));
     cleanup.push(dir);
-    const dbPath = join(dir, "insights.sqlite");
 
-    await OpenCodeInsights({} as never, { dbPath, cliShim: false });
+    await OpenCodeInsights({} as never, { dataDir: dir, cliShim: false });
 
-    expect(existsSync(dbPath) || existsSync(`${dbPath}.jsonl`)).toBe(true);
+    expect(existsSync(join(dir, "insights.sqlite")) || existsSync(join(dir, "insights.sqlite.jsonl"))).toBe(true);
   });
 
   test("exposes request-context hooks by default", async () => {
     const dir = await mkdtemp(join(tmpdir(), "opencode-insights-plugin-"));
     cleanup.push(dir);
-    const plugin = await OpenCodeInsights({} as never, { dbPath: join(dir, "insights.sqlite"), cliShim: false });
+    const plugin = await OpenCodeInsights({} as never, { dataDir: dir, cliShim: false });
 
     expect(plugin).toHaveProperty("chat.headers");
     expect(plugin).toHaveProperty("experimental.chat.messages.transform");
     expect(plugin).toHaveProperty("experimental.chat.system.transform");
+  });
+
+  test("stores at the dbPath configured in config.jsonc", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "opencode-insights-plugin-"));
+    cleanup.push(dir);
+    const dbPath = join(dir, "custom.sqlite");
+    await writeFile(join(dir, "config.jsonc"), JSON.stringify({ dbPath }), "utf8");
+
+    await OpenCodeInsights({} as never, { dataDir: dir, cliShim: false });
+
+    expect(existsSync(dbPath) || existsSync(`${dbPath}.jsonl`)).toBe(true);
   });
 });

@@ -2,6 +2,7 @@ import type { Plugin } from "@opencode-ai/plugin";
 import type { TuiPlugin } from "@opencode-ai/plugin/tui";
 import {
   createCaptureStore,
+  insightsOptionsFromConfig,
   normalizeChatHeadersCapture,
   normalizeChatMessageCapture,
   normalizeChatParamsCapture,
@@ -9,12 +10,13 @@ import {
   normalizeExperimentalChatMessagesTransformCapture,
   normalizeExperimentalChatSystemTransformCapture,
   normalizeToolCapture,
-  type InsightsOptions
+  readInsightsConfig
 } from "./capture.js";
 import { ensureCliShim } from "./cli-shim.js";
 
-type OpenCodeInsightsOptions = InsightsOptions & {
+type OpenCodeInsightsOptions = {
   cliShim?: boolean | undefined;
+  dataDir?: string | undefined;
 };
 
 export const OpenCodeInsights: Plugin = async (_input, options?: OpenCodeInsightsOptions) => {
@@ -22,7 +24,8 @@ export const OpenCodeInsights: Plugin = async (_input, options?: OpenCodeInsight
     void ensureCliShim().catch(() => undefined);
   }
 
-  const store = createCaptureStore(options);
+  const config = await readInsightsConfig(options);
+  const store = createCaptureStore(insightsOptionsFromConfig(config, options?.dataDir));
 
   try {
     await store.initialize?.();
