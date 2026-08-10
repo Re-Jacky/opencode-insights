@@ -3,6 +3,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { homedir } from "node:os";
 import { DEFAULT_PROMPT_RIGHT_METRICS, type PromptRightMetric } from "./metrics.js";
+import { parse, type ParseError } from "jsonc-parser";
 
 export type CaptureKind =
   | "chat.message"
@@ -47,6 +48,8 @@ export type GoUsageConfig = {
 export type InsightsConfig = {
   promptRightMetrics: PromptRightMetric[];
   goUsage: GoUsageConfig;
+  dbPath?: string | undefined;
+  retentionDays?: number | undefined;
 };
 
 const DEFAULT_RETENTION_DAYS = 1;
@@ -143,25 +146,65 @@ export function resolveCapturePath(options: InsightsOptions = {}) {
 }
 
 export function resolveInsightsConfigPath(options: InsightsOptions = {}) {
-  return join(dirname(resolveCapturePath(options)), "config.json");
+  return join(resolveConfigDataDir(options), "config.jsonc");
+}
+
+export function resolveLegacyInsightsConfigPath(options: InsightsOptions = {}) {
+  return join(resolveConfigDataDir(options), "config.json");
+}
+
+function resolveConfigDataDir(options: InsightsOptions = {}) {
+  return typeof options.dataDir === "string" && options.dataDir.length > 0
+    ? options.dataDir
+    : defaultDataDir();
 }
 
 export async function readInsightsConfig(options: InsightsOptions = {}): Promise<InsightsConfig> {
-  const path = resolveInsightsConfigPath(options);
-  if (!existsSync(path)) {
-    try {
-      await mkdir(dirname(path), { recursive: true });
-      await writeFile(path, `${JSON.stringify(defaultInsightsConfig(), null, 2)}\n`, "utf8");
-    } catch {
-      return defaultInsightsConfig();
-    }
+  const jsoncPath = resolveInsightsConfigPath(options);
+  if (existsSync(jsoncPath)) {
+    return parseInsightsConfigFile(jsoncPath);
+  }
+
+  const legacyPath = resolveLegacyInsightsConfigPath(options);
+  if (existsSync(legacyPath)) {
+    return parseInsightsConfigFile(legacyPath);
   }
 
   try {
-    return insightsConfigFrom(JSON.parse(await readFile(path, "utf8")));
+    await mkdir(dirname(jsoncPath), { recursive: true });
+    await writeFile(jsoncPath, defaultInsightsConfigJsonc(), "utf8");
+  } catch {
+    // First-run setup is best-effort; defaults still apply.
+  }
+  return defaultInsightsConfig();
+}
+
+async function parseInsightsConfigFile(path: string): Promise<InsightsConfig> {
+  try {
+    const parseErrors: ParseError[] = [];
+    const parsed = parse(await readFile(path, "utf8"), parseErrors, { allowTrailingComma: true }) as unknown;
+    if (parseErrors.length > 0) return defaultInsightsConfig();
+    return insightsConfigFrom(parsed);
   } catch {
     return defaultInsightsConfig();
   }
+}
+
+function defaultInsightsConfigJsonc(): string {
+  return [
+    "{",
+    "  // Database file. Default: ~/.opencode-insights/insights.sqlite",
+    '  // "dbPath": "/absolute/path/to/insights.sqlite",',
+    '  "retentionDays": 1,',
+    `  "promptRightMetrics": ${JSON.stringify(DEFAULT_PROMPT_RIGHT_METRICS)},`,
+    `  "goUsage": ${JSON.stringify(defaultGoUsageConfig())}`,
+    "}",
+    ""
+  ].join("\n");
+}
+
+export function insightsOptionsFromConfig(config: InsightsConfig, dataDir?: string): InsightsOptions {
+  return compactUndefined({ dataDir, dbPath: config.dbPath, retentionDays: config.retentionDays });
 }
 
 function defaultInsightsConfig(): InsightsConfig {
@@ -177,9 +220,18 @@ function insightsConfigFrom(value: unknown): InsightsConfig {
   const metrics = Array.isArray(record.promptRightMetrics)
     ? record.promptRightMetrics.filter(isPromptRightMetric)
     : [];
+  const dbPath =
+    typeof record.dbPath === "string" && record.dbPath.trim().length > 0 ? record.dbPath : undefined;
+  const rawRetention = record.retentionDays;
+  const retentionDays =
+    rawRetention === undefined || rawRetention === null || rawRetention === ""
+      ? undefined
+      : resolveRetentionDays(rawRetention);
   return {
     promptRightMetrics: metrics.length ? metrics : [...DEFAULT_PROMPT_RIGHT_METRICS],
-    goUsage: goUsageConfigFrom(record.goUsage)
+    goUsage: goUsageConfigFrom(record.goUsage),
+    dbPath,
+    retentionDays
   };
 }
 

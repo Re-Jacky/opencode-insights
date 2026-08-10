@@ -8,6 +8,7 @@ import {
   defaultDataDir,
   readInsightsConfig,
   resolveInsightsConfigPath,
+  resolveLegacyInsightsConfigPath,
   normalizeChatParamsCapture,
   normalizeEventCapture,
   normalizeExperimentalChatMessagesTransformCapture,
@@ -27,7 +28,7 @@ describe("full-fidelity local capture", () => {
     expect(defaultDataDir()).toMatch(/\.opencode-insights$/);
   });
 
-  test("creates a default metrics config beside the capture database", async () => {
+  test("creates a default jsonc config beside the capture database", async () => {
     const dataDir = await mkdtemp(join(tmpdir(), "opencode-insights-config-"));
     cleanup.push(dataDir);
 
@@ -35,7 +36,63 @@ describe("full-fidelity local capture", () => {
       promptRightMetrics: ["tps", "avg", "used", "cache"],
       goUsage: { enabled: false, cookie: "", workspaceID: "", refreshMs: 300_000 }
     });
-    await expect(readFile(resolveInsightsConfigPath({ dataDir }), "utf8")).resolves.toContain('"promptRightMetrics"');
+    const jsonc = await readFile(resolveInsightsConfigPath({ dataDir }), "utf8");
+    expect(jsonc).toContain('"promptRightMetrics"');
+    expect(jsonc).toContain('"retentionDays": 1');
+    expect(jsonc).toContain('// "dbPath"');
+    expect(jsonc.match(/^\s*"dbPath"/m)).toBeNull();
+    await expect(readFile(resolveLegacyInsightsConfigPath({ dataDir }), "utf8")).rejects.toThrow();
+  });
+
+  test("parses dbPath and retentionDays from jsonc config", async () => {
+    const dataDir = await mkdtemp(join(tmpdir(), "opencode-insights-config-"));
+    cleanup.push(dataDir);
+    await writeFile(
+      resolveInsightsConfigPath({ dataDir }),
+      '{\n  "dbPath": "/tmp/custom.sqlite",\n  "retentionDays": 0\n}\n'
+    );
+
+    await expect(readInsightsConfig({ dataDir })).resolves.toEqual({
+      promptRightMetrics: ["tps", "avg", "used", "cache"],
+      goUsage: { enabled: false, cookie: "", workspaceID: "", refreshMs: 300_000 },
+      dbPath: "/tmp/custom.sqlite",
+      retentionDays: 0
+    });
+  });
+
+  test("allows comments and trailing commas in the jsonc config", async () => {
+    const dataDir = await mkdtemp(join(tmpdir(), "opencode-insights-config-"));
+    cleanup.push(dataDir);
+    await writeFile(
+      resolveInsightsConfigPath({ dataDir }),
+      '{\n  // "dbPath": "/commented/out.sqlite",\n  "retentionDays": 3, // keep three days\n}\n'
+    );
+
+    await expect(readInsightsConfig({ dataDir })).resolves.toMatchObject({ retentionDays: 3 });
+  });
+
+  test("falls back to the legacy config.json when config.jsonc is absent", async () => {
+    const dataDir = await mkdtemp(join(tmpdir(), "opencode-insights-config-"));
+    cleanup.push(dataDir);
+    await writeFile(
+      resolveLegacyInsightsConfigPath({ dataDir }),
+      JSON.stringify({ promptRightMetrics: ["used"], retentionDays: 7 })
+    );
+
+    await expect(readInsightsConfig({ dataDir })).resolves.toEqual({
+      promptRightMetrics: ["used"],
+      goUsage: { enabled: false, cookie: "", workspaceID: "", refreshMs: 300_000 },
+      retentionDays: 7
+    });
+  });
+
+  test("prefers config.jsonc over a legacy config.json", async () => {
+    const dataDir = await mkdtemp(join(tmpdir(), "opencode-insights-config-"));
+    cleanup.push(dataDir);
+    await writeFile(resolveInsightsConfigPath({ dataDir }), JSON.stringify({ promptRightMetrics: ["cache"] }));
+    await writeFile(resolveLegacyInsightsConfigPath({ dataDir }), JSON.stringify({ promptRightMetrics: ["used"] }));
+
+    await expect(readInsightsConfig({ dataDir })).resolves.toMatchObject({ promptRightMetrics: ["cache"] });
   });
 
   test("reads supported configured prompt-right metrics in order", async () => {
