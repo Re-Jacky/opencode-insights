@@ -93,12 +93,13 @@ The `uninstall` command removes plugin config entries and local Insights data; i
 
 - Configurable live metrics in the OpenCode session prompt zone.
 - A collapsible session-wide `Token Usage` sidebar showing total tokens, response count, input/output/reasoning usage, cache read/write usage, and aggregate cache rate. It loads completed responses already present in the session and continues updating live.
+- An opt-in `Go Usage` sidebar showing OpenCode Go rolling/weekly/monthly usage limits for sessions that use the `opencode-go` provider.
 - Subagent status (running, done, failed, elapsed time, and token/context usage) in the sidebar.
 - Local capture of OpenCode hook/event data without redaction.
 - A local web viewer for reconstructed sessions, user turns, hidden request context, system/messages transforms, and assistant thinking/response sequences.
 - Native OpenCode footer components (project directory and version) remain visible — the plugin does not override `sidebar_footer` or `home_prompt_right` slots.
 
-The right sidebar contains two independent plugin sections: `Token Usage` and `Subagents`. Click either section header to collapse or expand it. Token usage is aggregated across the full session; prompt-right `used` and `cache` values continue to represent the latest completed assistant response.
+The right sidebar contains the plugin sections: `Token Usage`, `Go Usage` (when enabled and the session uses `opencode-go`), and `Subagents`. Click any section header to collapse or expand it. Token usage is aggregated across the full session; prompt-right `used` and `cache` values continue to represent the latest completed assistant response.
 
 ## TUI Metrics Configuration
 
@@ -117,6 +118,28 @@ With a custom database path, the configuration file is created in that database'
 ```
 
 `promptRightMetrics` controls both the fields and their order. Supported values are `tps`, `avg`, `ttft`, `used`, `cache`, `input`, `output`, and `reasoning`. Values that are not recognized are ignored; an empty or invalid configuration uses the default. Restart OpenCode after editing this file.
+
+## Go Usage Configuration
+
+The `Go Usage` sidebar shows the rolling (5 hour), weekly, and monthly usage limits of your OpenCode Go subscription for sessions that use the `opencode-go` provider. It is disabled by default and opt-in:
+
+```json
+{
+  "goUsage": {
+    "enabled": true,
+    "cookie": "Fe26.2**...",
+    "workspaceID": "wrk_...",
+    "refreshMs": 300000
+  }
+}
+```
+
+- `enabled` — set to `true` to activate the section. Defaults to `false`.
+- `cookie` — the `auth` session cookie for `opencode.ai` (see below).
+- `workspaceID` — your workspace id, visible in the console URL (`/workspace/<workspaceID>/go`).
+- `refreshMs` — how often to re-fetch usage from the console. Defaults to `300000` (5 minutes); values below 60000 are clamped.
+
+To get the cookie, log in to `https://opencode.ai`, open the workspace `/go` page, then copy the `auth` cookie value from your browser's DevTools (Application → Cookies → `https://opencode.ai`). The cookie lasts up to a year; if the section shows an error, copy it again. Restart OpenCode after editing this file.
 
 ## Open The Viewer
 

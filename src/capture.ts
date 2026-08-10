@@ -37,12 +37,22 @@ export type InsightsOptions = {
   retentionDays?: unknown;
 };
 
+export type GoUsageConfig = {
+  enabled: boolean;
+  cookie: string;
+  workspaceID: string;
+  refreshMs: number;
+};
+
 export type InsightsConfig = {
   promptRightMetrics: PromptRightMetric[];
+  goUsage: GoUsageConfig;
 };
 
 const DEFAULT_RETENTION_DAYS = 1;
 const DAY_MS = 24 * 60 * 60 * 1000;
+const DEFAULT_GO_USAGE_REFRESH_MS = 300_000;
+const MIN_GO_USAGE_REFRESH_MS = 60_000;
 
 let sequence = 0;
 
@@ -155,13 +165,35 @@ export async function readInsightsConfig(options: InsightsOptions = {}): Promise
 }
 
 function defaultInsightsConfig(): InsightsConfig {
-  return { promptRightMetrics: [...DEFAULT_PROMPT_RIGHT_METRICS] };
+  return { promptRightMetrics: [...DEFAULT_PROMPT_RIGHT_METRICS], goUsage: defaultGoUsageConfig() };
+}
+
+function defaultGoUsageConfig(): GoUsageConfig {
+  return { enabled: false, cookie: "", workspaceID: "", refreshMs: DEFAULT_GO_USAGE_REFRESH_MS };
 }
 
 function insightsConfigFrom(value: unknown): InsightsConfig {
-  if (!isRecord(value) || !Array.isArray(value.promptRightMetrics)) return defaultInsightsConfig();
-  const metrics = value.promptRightMetrics.filter(isPromptRightMetric);
-  return metrics.length ? { promptRightMetrics: metrics } : defaultInsightsConfig();
+  const record = isRecord(value) ? value : {};
+  const metrics = Array.isArray(record.promptRightMetrics)
+    ? record.promptRightMetrics.filter(isPromptRightMetric)
+    : [];
+  return {
+    promptRightMetrics: metrics.length ? metrics : [...DEFAULT_PROMPT_RIGHT_METRICS],
+    goUsage: goUsageConfigFrom(record.goUsage)
+  };
+}
+
+function goUsageConfigFrom(value: unknown): GoUsageConfig {
+  const record = isRecord(value) ? value : {};
+  const enabled = record.enabled === true;
+  const cookie = typeof record.cookie === "string" && record.cookie.length > 0 ? record.cookie : "";
+  const workspaceID =
+    typeof record.workspaceID === "string" && record.workspaceID.length > 0 ? record.workspaceID : "";
+  const refreshMs =
+    typeof record.refreshMs === "number" && Number.isFinite(record.refreshMs)
+      ? Math.max(MIN_GO_USAGE_REFRESH_MS, Math.trunc(record.refreshMs))
+      : DEFAULT_GO_USAGE_REFRESH_MS;
+  return { enabled, cookie, workspaceID, refreshMs };
 }
 
 function isPromptRightMetric(value: unknown): value is PromptRightMetric {

@@ -2,9 +2,18 @@
 import { createTextAttributes, StyledText, type MouseEvent, type TextChunk, type TextRenderable } from "@opentui/core";
 import type { TuiPlugin, TuiPluginApi, TuiPluginModule } from "@opencode-ai/plugin/tui";
 import { createSignal, onCleanup } from "solid-js";
-import { readInsightsConfig } from "./capture.js";
+import { readInsightsConfig, type InsightsConfig } from "./capture.js";
 import { createListenerRegistry, type Listener } from "./listeners.js";
 import { hasRenderStateChanged } from "./render-state.js";
+import {
+  createGoProviderTracker,
+  createGoUsageRefresher,
+  formatGoUsageRow,
+  goUsageRows,
+  goUsageSectionVisible,
+  type GoUsageRow,
+  type GoUsageState
+} from "./go-usage.js";
 import {
   createMetricsState,
   recordAssistantDelta,
@@ -121,6 +130,94 @@ function TokenUsageSidebar(props: {
       {""}
     </text>
   );
+}
+
+function GoUsageSidebar(props: {
+  api: TuiPluginApi;
+  state: GoUsageState;
+  config: InsightsConfig;
+  tracker: ReturnType<typeof createGoProviderTracker>;
+  sessionID: string;
+  subscribe: (listener: Listener) => () => void;
+  goUsageSubscribe: (listener: Listener) => () => void;
+  refresh: () => void;
+}) {
+  let text: TextRenderable | undefined;
+  const [collapsed, setCollapsed] = createSignal(false);
+  const titleAttributes = createTextAttributes({ bold: true });
+  let previous: { content: string; visible: boolean; height: number | string } | undefined;
+
+  const toggle = (event: MouseEvent) => {
+    if (!text || event.y !== text.y) return;
+    setCollapsed((prev) => !prev);
+    sync();
+  };
+
+  const sync = () => {
+    if (!text) return;
+    const visible = goUsageSectionVisible(props.config, props.tracker.usesOpenCodeGo(props.sessionID));
+    if (visible) props.refresh();
+    const rows = visible ? goUsageRows(props.state, Date.now()) : undefined;
+    const error = props.state.error;
+    const showContent = visible && (rows || error);
+    const signature = showContent ? JSON.stringify({ collapsed: collapsed(), rows, error }) : "";
+    const next: { content: string; visible: boolean; height: number | "auto" } = {
+      content: signature,
+      visible: signature.length > 0,
+      height: signature.length > 0 ? "auto" : 0
+    };
+    if (!hasRenderStateChanged(previous, next)) return;
+    previous = next;
+    text.visible = next.visible;
+    text.height = next.height;
+    text.content = showContent ? renderGoUsageSidebar(rows, error, props.api, titleAttributes, collapsed()) : "";
+    props.api.renderer.requestRender();
+  };
+
+  const unsubscribe = props.subscribe(sync);
+  const unsubscribeGoUsage = props.goUsageSubscribe(sync);
+  const timer = setInterval(sync, 1_000);
+  onCleanup(() => {
+    unsubscribe();
+    unsubscribeGoUsage();
+    clearInterval(timer);
+  });
+
+  return (
+    <text
+      ref={(ref: TextRenderable) => {
+        text = ref;
+        sync();
+      }}
+      onMouseDown={toggle}
+      fg={props.api.theme.current.textMuted}
+    >
+      {""}
+    </text>
+  );
+}
+
+function renderGoUsageSidebar(
+  rows: GoUsageRow[] | undefined,
+  error: string | undefined,
+  api: TuiPluginApi,
+  titleAttributes: number,
+  collapsed: boolean
+) {
+  const chunks: TextChunk[] = [
+    textChunk(`${collapsed ? "▶" : "▼"} Go Usage\n`, api.theme.current.text, titleAttributes)
+  ];
+  if (!collapsed) {
+    if (rows && rows.length > 0) {
+      for (const [index, row] of rows.entries()) {
+        if (index > 0) chunks.push(textChunk("\n"));
+        chunks.push(textChunk(formatGoUsageRow(row), api.theme.current.textMuted));
+      }
+    } else if (error) {
+      chunks.push(textChunk(`Go usage: ${error}`, api.theme.current.error));
+    }
+  }
+  return new StyledText(chunks);
 }
 
 function SubagentSidebar(props: {
@@ -269,7 +366,14 @@ const tui: TuiPlugin = async (api, options) => {
   const subagents = createSubagentState();
   const metricListeners = createListenerRegistry();
   const subagentListeners = createListenerRegistry();
+  const goUsageListeners = createListenerRegistry();
   const hydratedSessions = new Set<string>();
+  const goProviderTracker = createGoProviderTracker();
+  const goUsage = createGoUsageRefresher(config.goUsage);
+
+  const refreshGoUsage = async () => {
+    if (await goUsage.refresh()) goUsageListeners.notify();
+  };
 
   const hydrateSessionMetrics = async (sessionID: string) => {
     if (!isSessionID(sessionID) || hydratedSessions.has(sessionID)) return;
@@ -280,6 +384,8 @@ const tui: TuiPlugin = async (api, options) => {
       const messages = response.data ?? [];
       for (const message of messages) {
         const info = message.info;
+        const providerID = (info as { providerID?: unknown }).providerID;
+        goProviderTracker.record(sessionID, typeof providerID === "string" ? providerID : undefined);
         if (info.role !== "assistant" || typeof info.time.completed !== "number") continue;
         const input = {
           sessionID: info.sessionID,
@@ -314,6 +420,10 @@ const tui: TuiPlugin = async (api, options) => {
   const offMessage = api.event.on("message.updated", (evt) => {
     const info = evt.properties.info;
     if (applySubagentEvent(subagents, evt)) subagentListeners.notify();
+    const sessionID = info.sessionID ?? evt.properties.sessionID;
+    const providerID =
+      (info as { providerID?: unknown }).providerID ?? (info as { model?: { providerID?: unknown } }).model?.providerID;
+    goProviderTracker.record(sessionID, typeof providerID === "string" ? providerID : undefined);
     if (info.role !== "assistant") return;
 
     const messageInput: {
@@ -358,6 +468,13 @@ const tui: TuiPlugin = async (api, options) => {
 
   const offSessionUpdated = api.event.on("session.updated", (evt) => {
     if (applySubagentEvent(subagents, evt)) subagentListeners.notify();
+    const info = evt.properties.info as { id?: unknown; model?: { providerID?: unknown } } | undefined;
+    const sessionID = typeof info?.id === "string" ? info.id : undefined;
+    const providerID = info?.model?.providerID;
+    if (sessionID && typeof providerID === "string") {
+      goProviderTracker.record(sessionID, providerID);
+      metricListeners.notify();
+    }
   });
 
   const offSessionStatus = api.event.on("session.status", (evt) => {
@@ -397,6 +514,16 @@ const tui: TuiPlugin = async (api, options) => {
             state={metrics}
             subscribe={metricListeners.subscribe}
             hydrate={() => void hydrateSessionMetrics(props.session_id)}
+          />
+          <GoUsageSidebar
+            api={api}
+            state={goUsage.state}
+            config={config}
+            tracker={goProviderTracker}
+            sessionID={props.session_id}
+            subscribe={metricListeners.subscribe}
+            goUsageSubscribe={goUsageListeners.subscribe}
+            refresh={() => void refreshGoUsage()}
           />
           <SubagentSidebar
             api={api}
