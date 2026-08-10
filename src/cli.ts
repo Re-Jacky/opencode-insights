@@ -7,7 +7,7 @@ import { homedir } from "node:os";
 import { pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 import { applyEdits, modify, parse, type ParseError } from "jsonc-parser";
-import { resolveCapturePath } from "./capture.js";
+import { readInsightsConfig, resolveCapturePath, resolveInsightsConfigPath } from "./capture.js";
 import { buildRequestHistory, formatCaptureSummary, readRecentCaptures } from "./inspect.js";
 import { serveViewer } from "./viewer.js";
 
@@ -28,7 +28,6 @@ type CliOptions = {
   port?: number | undefined;
   output?: string | undefined;
   configDir?: string | undefined;
-  retentionDays?: number | undefined;
   dryRun: boolean;
   keepData: boolean;
 };
@@ -37,6 +36,8 @@ async function main(argv: string[]) {
   const command = argv[2] ?? "recent";
   const options = parseOptions(argv.slice(3));
   const positionals = parsePositionals(argv.slice(3));
+  const config = await readInsightsConfig();
+  options.dbPath = config.dbPath;
 
   if (command === "help" || command === "--help" || command === "-h") {
     process.stdout.write(`${usage()}\n`);
@@ -137,14 +138,6 @@ export function parseOptions(args: string[]): CliOptions {
       options.dryRun = true;
     } else if (arg === "--keep-data") {
       options.keepData = true;
-    } else if (arg === "--db") {
-      const value = args[index + 1];
-      if (value) options.dbPath = value;
-      index += 1;
-    } else if (arg === "--data-dir") {
-      const value = args[index + 1];
-      if (value) options.dataDir = value;
-      index += 1;
     } else if (arg === "--limit") {
       options.limit = Number.parseInt(args[index + 1] ?? "20", 10);
       options.limitProvided = true;
@@ -164,16 +157,10 @@ export function parseOptions(args: string[]): CliOptions {
       const value = args[index + 1];
       if (value) options.configDir = value;
       index += 1;
-    } else if (arg === "--retention-days") {
-      options.retentionDays = Number.parseFloat(args[index + 1] ?? "");
-      index += 1;
     }
   }
   if (!Number.isFinite(options.limit) || options.limit < 1) options.limit = DEFAULT_RECENT_LIMIT;
   if (options.port !== undefined && (!Number.isFinite(options.port) || options.port < 1)) options.port = 8765;
-  if (options.retentionDays !== undefined && (!Number.isFinite(options.retentionDays) || options.retentionDays < 0)) {
-    options.retentionDays = undefined;
-  }
   return options;
 }
 
@@ -333,7 +320,7 @@ export async function configureOpenCodeDebug(options: CliOptions) {
   const tuiSource = await readJsonConfigSource(tuiPath);
   const opencodeConfig = await readJsonConfig(opencodePath, { plugin: [] }, opencodeSource);
   const tuiConfig = await readJsonConfig(tuiPath, { plugin: [] }, tuiSource);
-  setSinglePluginSpec(opencodeConfig, SERVER_PLUGIN_SPEC, [localServerEntry, debugServerOptions(options)], localServerEntry);
+  setSinglePluginSpec(opencodeConfig, SERVER_PLUGIN_SPEC, localServerEntry);
   setSinglePluginSpec(tuiConfig, TUI_PLUGIN_SPEC, localTuiEntry);
   removePlugin(tuiConfig, SUBPATH_TUI_PLUGIN_SPEC);
 
@@ -342,6 +329,7 @@ export async function configureOpenCodeDebug(options: CliOptions) {
     `TUI config: ${tuiPath}`,
     `Local server plugin: ${localServerEntry}`,
     `Local TUI plugin: ${localTuiEntry}`,
+    `Insights config: ${resolveInsightsConfigPath({ dataDir: options.dataDir })}`,
     `Server plugin: set local build output`,
     `TUI plugin: set local build output`
   ];
@@ -351,6 +339,7 @@ export async function configureOpenCodeDebug(options: CliOptions) {
     return lines.join("\n");
   }
 
+  await readInsightsConfig({ dataDir: options.dataDir });
   await mkdir(configDir, { recursive: true });
   await writeJsonConfig(opencodePath, opencodeConfig, opencodeSource);
   await writeJsonConfig(tuiPath, tuiConfig, tuiSource);
@@ -435,12 +424,6 @@ export function stripJsonCommentsAndTrailingCommas(input: string) {
 
 function isJsonObject(value: unknown): value is JsonObject {
   return !!value && typeof value === "object" && !Array.isArray(value);
-}
-
-function debugServerOptions(options: CliOptions) {
-  const serverOptions: JsonObject = {};
-  if (options.retentionDays !== undefined) serverOptions.retentionDays = options.retentionDays;
-  return serverOptions;
 }
 
 export function addUniquePlugin(config: JsonObject, plugin: string) {
@@ -553,17 +536,17 @@ async function writeJsonConfig(path: string, config: JsonObject, source?: string
 function usage() {
   return [
     "Usage:",
-    "  opencode-insights debug [--config-dir DIR] [--retention-days DAYS] [--dry-run]",
-    "  opencode-insights uninstall [--config-dir DIR] [--db PATH] [--data-dir DIR] [--keep-data] [--dry-run]",
-    "  opencode-insights recent [--db PATH] [--data-dir DIR] [--limit N] [--json]",
-    "  opencode-insights sessions [--db PATH] [--data-dir DIR] [--limit N] [--json]",
-    "  opencode-insights history [--db PATH] [--data-dir DIR] [--limit N]",
-    "  opencode-insights show <session-id> [--db PATH] [--data-dir DIR] [--limit N]",
-    "  opencode-insights export <session-id> [--output PATH] [--db PATH] [--data-dir DIR] [--limit N]",
-    "  opencode-insights serve [--db PATH] [--data-dir DIR] [--limit N] [--host HOST] [--port PORT]",
-    "  opencode-insights open [--db PATH] [--data-dir DIR] [--limit N] [--host HOST] [--port PORT]",
-    "  opencode-insights doctor [--db PATH] [--data-dir DIR]",
-    "  opencode-insights vacuum [--db PATH] [--data-dir DIR]"
+    "  opencode-insights debug [--config-dir DIR] [--dry-run]",
+    "  opencode-insights uninstall [--config-dir DIR] [--keep-data] [--dry-run]",
+    "  opencode-insights recent [--limit N] [--json]",
+    "  opencode-insights sessions [--limit N] [--json]",
+    "  opencode-insights history [--limit N]",
+    "  opencode-insights show <session-id> [--limit N]",
+    "  opencode-insights export <session-id> [--output PATH] [--limit N]",
+    "  opencode-insights serve [--limit N] [--host HOST] [--port PORT]",
+    "  opencode-insights open [--limit N] [--host HOST] [--port PORT]",
+    "  opencode-insights doctor",
+    "  opencode-insights vacuum"
   ].join("\n");
 }
 

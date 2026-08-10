@@ -9,6 +9,7 @@ import {
   summarizeSessions,
   uninstallOpenCode
 } from "../src/cli.js";
+import { readInsightsConfig, resolveInsightsConfigPath } from "../src/capture.js";
 import type { HistorySession } from "../src/inspect.js";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -16,15 +17,13 @@ import { join, resolve } from "node:path";
 
 describe("cli helpers", () => {
   test("parses common command options", () => {
-    expect(parseOptions(["--db", "/tmp/insights.sqlite", "--limit", "100", "--json", "--port", "9999", "--retention-days", "2.5", "-o", "/tmp/out.json"])).toEqual({
-      dbPath: "/tmp/insights.sqlite",
+    expect(parseOptions(["--limit", "100", "--json", "--port", "9999", "-o", "/tmp/out.json"])).toEqual({
       dryRun: false,
       keepData: false,
       limit: 100,
       limitProvided: true,
       json: true,
       port: 9999,
-      retentionDays: 2.5,
       output: "/tmp/out.json"
     });
   });
@@ -48,9 +47,8 @@ describe("cli helpers", () => {
   });
 
   test("parses uninstall options", () => {
-    expect(parseOptions(["--config-dir", "/tmp/opencode", "--data-dir", "/tmp/insights", "--keep-data", "--dry-run"])).toMatchObject({
+    expect(parseOptions(["--config-dir", "/tmp/opencode", "--keep-data", "--dry-run"])).toMatchObject({
       configDir: "/tmp/opencode",
-      dataDir: "/tmp/insights",
       dryRun: true,
       keepData: true
     });
@@ -97,7 +95,7 @@ describe("cli helpers", () => {
 
       const output = await uninstallOpenCode({
         configDir: dir,
-        dataDir,
+        dbPath: join(dataDir, "insights.sqlite"),
         limit: 20,
         limitProvided: false,
         json: false,
@@ -153,6 +151,7 @@ describe("cli helpers", () => {
   test("debug command points opencode and tui configs at local build output", async () => {
     const dir = await mkdtemp(join(tmpdir(), "opencode-insights-test-"));
     const projectDir = await mkdtemp(join(tmpdir(), "opencode-insights-project-"));
+    const dataDir = await mkdtemp(join(tmpdir(), "opencode-insights-data-"));
     const originalCwd = process.cwd();
     try {
       await mkdir(join(projectDir, "dist"), { recursive: true });
@@ -172,12 +171,12 @@ describe("cli helpers", () => {
       process.chdir(projectDir);
       const output = await configureOpenCodeDebug({
         configDir: dir,
+        dataDir,
         limit: 20,
         limitProvided: false,
         json: false,
         dryRun: false,
-        keepData: false,
-        retentionDays: 2
+        keepData: false
       });
 
       const localServerEntry = resolve("dist/index.js");
@@ -190,12 +189,50 @@ describe("cli helpers", () => {
       expect(output).toContain(localTuiEntry);
       expect(opencodeText).toContain("Keep this comment");
       expect(tuiText).toContain("Keep this TUI comment");
-      expect(opencode.plugin).toEqual(["existing", [localServerEntry, { retentionDays: 2 }]]);
+      expect(opencode.plugin).toEqual(["existing", localServerEntry]);
       expect(tui.plugin).toEqual(["other-tui", localTuiEntry]);
+      const configJsonc = await readFile(join(dataDir, "config.jsonc"), "utf8");
+      expect(configJsonc).toContain('"retentionDays": 1');
+      expect(configJsonc).toContain('// "dbPath"');
     } finally {
       process.chdir(originalCwd);
       await rm(dir, { recursive: true, force: true });
       await rm(projectDir, { recursive: true, force: true });
+      await rm(dataDir, { recursive: true, force: true });
+    }
+  });
+
+  test("debug leaves an existing config.jsonc untouched", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "opencode-insights-test-"));
+    const projectDir = await mkdtemp(join(tmpdir(), "opencode-insights-project-"));
+    const dataDir = await mkdtemp(join(tmpdir(), "opencode-insights-data-"));
+    const originalCwd = process.cwd();
+    try {
+      await mkdir(join(projectDir, "dist"), { recursive: true });
+      await writeFile(join(projectDir, "dist", "index.js"), "", "utf8");
+      await writeFile(join(projectDir, "dist", "tui.js"), "", "utf8");
+      await writeFile(join(dataDir, "config.jsonc"), '{\n  "retentionDays": 7, // my setting\n}\n', "utf8");
+      await writeFile(join(dir, "opencode.jsonc"), '{"plugin": []}\n', "utf8");
+      await writeFile(join(dir, "tui.json"), '{"plugin": []}\n', "utf8");
+
+      process.chdir(projectDir);
+      const output = await configureOpenCodeDebug({
+        configDir: dir,
+        dataDir,
+        limit: 20,
+        limitProvided: false,
+        json: false,
+        dryRun: false,
+        keepData: false
+      });
+
+      expect(output).toContain("Insights config:");
+      await expect(readFile(join(dataDir, "config.jsonc"), "utf8")).resolves.toContain('"retentionDays": 7, // my setting');
+    } finally {
+      process.chdir(originalCwd);
+      await rm(dir, { recursive: true, force: true });
+      await rm(projectDir, { recursive: true, force: true });
+      await rm(dataDir, { recursive: true, force: true });
     }
   });
 
