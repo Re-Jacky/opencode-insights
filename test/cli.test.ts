@@ -62,7 +62,7 @@ describe("cli helpers", () => {
 
   test("warns that removed storage flags are no longer supported", () => {
     expect(unsupportedFlagWarning("--db")).toBe("warning: --db is no longer supported; set dbPath in ~/.opencode-insights/config.jsonc");
-    expect(unsupportedFlagWarning("--data-dir")).toBe("warning: --data-dir is no longer supported; set dataDir in ~/.opencode-insights/config.jsonc");
+    expect(unsupportedFlagWarning("--data-dir")).toBe("warning: --data-dir is no longer supported; the CLI reads the configured database path from ~/.opencode-insights/config.jsonc");
     expect(unsupportedFlagWarning("--retention-days")).toBe("warning: --retention-days is no longer supported; set retentionDays in ~/.opencode-insights/config.jsonc");
     expect(unsupportedFlagWarning("--limit")).toBeUndefined();
   });

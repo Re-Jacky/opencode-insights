@@ -33,7 +33,10 @@ type CliOptions = {
 };
 
 export function unsupportedFlagWarning(arg: string): string | undefined {
-  const setting = arg === "--db" ? "dbPath" : arg === "--data-dir" ? "dataDir" : arg === "--retention-days" ? "retentionDays" : undefined;
+  if (arg === "--data-dir") {
+    return "warning: --data-dir is no longer supported; the CLI reads the configured database path from ~/.opencode-insights/config.jsonc";
+  }
+  const setting = arg === "--db" ? "dbPath" : arg === "--retention-days" ? "retentionDays" : undefined;
   if (!setting) return undefined;
   return `warning: ${arg} is no longer supported; set ${setting} in ~/.opencode-insights/config.jsonc`;
 }
