@@ -195,7 +195,7 @@ function defaultInsightsConfigJsonc(): string {
     "{",
     "  // Database file. Default: ~/.opencode-insights/insights.sqlite",
     '  // "dbPath": "/absolute/path/to/insights.sqlite",',
-    '  "retentionDays": 1,',
+    `  "retentionDays": ${DEFAULT_RETENTION_DAYS},`,
     `  "promptRightMetrics": ${JSON.stringify(DEFAULT_PROMPT_RIGHT_METRICS)},`,
     `  "goUsage": ${JSON.stringify(defaultGoUsageConfig())}`,
     "}",
@@ -221,7 +221,7 @@ function insightsConfigFrom(value: unknown): InsightsConfig {
     ? record.promptRightMetrics.filter(isPromptRightMetric)
     : [];
   const dbPath =
-    typeof record.dbPath === "string" && record.dbPath.trim().length > 0 ? record.dbPath : undefined;
+    typeof record.dbPath === "string" && record.dbPath.trim().length > 0 ? record.dbPath.trim() : undefined;
   const rawRetention = record.retentionDays;
   const retentionDays =
     rawRetention === undefined || rawRetention === null || rawRetention === ""

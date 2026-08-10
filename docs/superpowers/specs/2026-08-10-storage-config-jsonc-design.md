@@ -131,3 +131,14 @@ Schema (all keys optional except where noted):
   plugin params are ignored.
 - `AGENTS.md`: update the operational-rule line (`config.json` → `config.jsonc`; storage
   settings are config-file-based).
+
+## Deviation from spec
+
+The CLI section above said the `debug` command writes `dbPath` (uncommented) and
+`retentionDays` into `config.jsonc` using jsonc-parser `modify`/`applyEdits`
+(preserving user comments). As implemented, `debug` only ensures the default
+`config.jsonc` template exists (commented `dbPath`, `retentionDays: 1`) and never
+modifies an existing file; it does NOT write an uncommented `dbPath` via
+`modify`/`applyEdits` as the spec text said. This is safer — it avoids relocating a
+user's real database when `debug` runs on a machine where a DB already lives at the
+configured path.

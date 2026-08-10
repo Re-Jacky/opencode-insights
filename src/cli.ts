@@ -32,8 +32,18 @@ type CliOptions = {
   keepData: boolean;
 };
 
+export function unsupportedFlagWarning(arg: string): string | undefined {
+  const setting = arg === "--db" ? "dbPath" : arg === "--data-dir" ? "dataDir" : arg === "--retention-days" ? "retentionDays" : undefined;
+  if (!setting) return undefined;
+  return `warning: ${arg} is no longer supported; set ${setting} in ~/.opencode-insights/config.jsonc`;
+}
+
 async function main(argv: string[]) {
   const command = argv[2] ?? "recent";
+  for (const arg of argv.slice(3)) {
+    const warning = unsupportedFlagWarning(arg);
+    if (warning) process.stderr.write(`${warning}\n`);
+  }
   const options = parseOptions(argv.slice(3));
   const positionals = parsePositionals(argv.slice(3));
   const config = await readInsightsConfig();

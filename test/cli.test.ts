@@ -7,9 +7,9 @@ import {
   removePlugin,
   stripJsonCommentsAndTrailingCommas,
   summarizeSessions,
-  uninstallOpenCode
+  uninstallOpenCode,
+  unsupportedFlagWarning
 } from "../src/cli.js";
-import { readInsightsConfig, resolveInsightsConfigPath } from "../src/capture.js";
 import type { HistorySession } from "../src/inspect.js";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -58,6 +58,13 @@ describe("cli helpers", () => {
     expect(JSON.parse(stripJsonCommentsAndTrailingCommas('{ "plugin": ["a",], // keep me parseable\n }'))).toEqual({
       plugin: ["a"]
     });
+  });
+
+  test("warns that removed storage flags are no longer supported", () => {
+    expect(unsupportedFlagWarning("--db")).toBe("warning: --db is no longer supported; set dbPath in ~/.opencode-insights/config.jsonc");
+    expect(unsupportedFlagWarning("--data-dir")).toBe("warning: --data-dir is no longer supported; set dataDir in ~/.opencode-insights/config.jsonc");
+    expect(unsupportedFlagWarning("--retention-days")).toBe("warning: --retention-days is no longer supported; set retentionDays in ~/.opencode-insights/config.jsonc");
+    expect(unsupportedFlagWarning("--limit")).toBeUndefined();
   });
 
   test("adds plugin entries once", () => {

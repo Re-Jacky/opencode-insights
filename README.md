@@ -239,7 +239,9 @@ If SQLite is unavailable in the plugin runtime, the fallback path is:
 ~/.opencode-insights/insights.sqlite.jsonl
 ```
 
-The database keeps one day of captures by default and auto-cleans older rows on startup and after new captures. Set `retentionDays` to another number of days, or `0` to disable auto-cleaning.
+The database keeps one day of captures by default and auto-cleans older rows on
+startup and after new captures; `retentionDays` sets how many days to keep (`0`
+disables auto-cleaning).
 
 Storage settings live in the config file `~/.opencode-insights/config.jsonc` (JSONC —
 comments allowed). The plugin creates it on first run with `dbPath` commented out
@@ -255,9 +257,11 @@ comments allowed). The plugin creates it on first run with `dbPath` commented ou
 }
 ```
 
-`retentionDays` sets how many days of captures are kept (`0` disables auto-cleaning).
 A legacy `config.json` is still honored when `config.jsonc` does not exist. Plugin
-params such as `{ "dbPath": … }` in `opencode.json` are no longer read.
+params such as `{ "dbPath": … }` in `opencode.json` are ignored after the upgrade —
+if you previously set `dbPath` or `retentionDays` there, copy those values into
+`~/.opencode-insights/config.jsonc`. CLI commands read the configured database path
+from this file; the former `--db`/`--data-dir`/`--retention-days` flags are removed.
 
 ## Privacy Model
 
