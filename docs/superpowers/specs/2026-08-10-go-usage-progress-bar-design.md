@@ -42,7 +42,7 @@ Examples (width 10):
 | 0%      | `░░░░░░░░░░`   |
 | 1%      | `▏░░░░░░░░░`   |
 | 12%     | `█▎░░░░░░░░`   |
-| 27%     | `██▊░░░░░░░░`  |
+| 27%     | `██▊░░░░░░░`   |
 | 50%     | `█████░░░░░`   |
 | 100%    | `██████████`   |
 | >100%   | `██████████`   |
@@ -72,5 +72,5 @@ fonts; `░` and `█` are already used today.
 - New `formatUsageBar` describe block: 0%, 1% (sliver), 12% (partial
   second char), 27%, 50%, 100% (full), and >100% clamping.
 - Update the three existing `formatGoUsageRow` expectations to the new
-  bar strings (12% → `█▎░░░░░░░░`, 27% → `██▊░░░░░░░░`, 100% →
+  bar strings (12% → `█▎░░░░░░░░`, 27% → `██▊░░░░░░░`, 100% →
   `██████████`).

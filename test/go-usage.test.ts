@@ -256,6 +256,10 @@ describe("formatUsageBar", () => {
     expect(formatUsageBar(0)).toBe("░░░░░░░░░░");
   });
 
+  test("clamps negative percentages to an empty bar", () => {
+    expect(formatUsageBar(-5)).toBe("░░░░░░░░░░");
+  });
+
   test("renders a sliver for one percent", () => {
     expect(formatUsageBar(1)).toBe("▏░░░░░░░░░");
   });

@@ -46,7 +46,7 @@ describe("formatUsageBar", () => {
 
   test("renders partial blocks for fractional step counts", () => {
     expect(formatUsageBar(12)).toBe("█▎░░░░░░░░");
-    expect(formatUsageBar(27)).toBe("██▊░░░░░░░░");
+    expect(formatUsageBar(27)).toBe("██▊░░░░░░░");
   });
 
   test("renders a half-filled bar at fifty percent", () => {
@@ -78,7 +78,7 @@ Inside the existing `describe("formatGoUsageRow", ...)`, update the three `expec
       "Weekly   11% █▏░░░░░░░░ 5d 15h"
     );
     expect(formatGoUsageRow({ label: "Monthly", usagePercent: 27, reset: "1d 17h" })).toBe(
-      "Monthly  27% ██▊░░░░░░░░ 1d 17h"
+      "Monthly  27% ██▊░░░░░░░ 1d 17h"
     );
   });
 
