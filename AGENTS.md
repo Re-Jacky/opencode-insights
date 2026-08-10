@@ -31,7 +31,7 @@ OpenCode plugin `@rejacky/opencode-insights` — local, unredacted capture of Op
 ## Operational rules
 
 - Plugin hooks are best-effort: capture and store failures are swallowed; never let the plugin throw or block OpenCode sessions.
-- Storage defaults to `~/.opencode-insights/insights.sqlite` with `config.json` beside it; `dbPath`/`retentionDays` are plugin options. One day of retention by default.
+- Storage defaults to `~/.opencode-insights/insights.sqlite` with `config.jsonc` beside it; `dbPath`/`retentionDays` are read from the config file (a legacy `config.json` is honored when the jsonc is absent). One day of retention by default.
 - Privacy model is intentional: nothing is redacted — captured data can include prompts, API keys, headers, and reasoning.
 - Design docs for new features live in `docs/superpowers/specs/` (e.g. the Go Usage design).
 
