@@ -113,12 +113,12 @@ export function createGoUsageRefresher(config: GoUsageConfig, fetchImpl: typeof 
   const state: GoUsageState = {};
   let inflight: Promise<void> | undefined;
 
-  async function refresh(now = Date.now()): Promise<void> {
+  async function refresh(now = Date.now()): Promise<boolean> {
     if (inflight) {
       await inflight;
-      return;
+      return false;
     }
-    if (state.lastFetchAt !== undefined && now - state.lastFetchAt < config.refreshMs) return;
+    if (state.lastFetchAt !== undefined && now - state.lastFetchAt < config.refreshMs) return false;
     inflight = (async () => {
       try {
         state.data = await fetchGoUsage({ cookie: config.cookie, workspaceID: config.workspaceID }, fetchImpl);
@@ -131,6 +131,7 @@ export function createGoUsageRefresher(config: GoUsageConfig, fetchImpl: typeof 
       }
     })();
     await inflight;
+    return true;
   }
 
   return { state, refresh };

@@ -84,6 +84,55 @@ describe("createGoUsageRefresher", () => {
     expect(calls).toBe(2);
   });
 
+  test("reports whether the refresh actually fetched", async () => {
+    let calls = 0;
+    const refresher = createGoUsageRefresher(
+      { ...ENABLED_CONFIG.goUsage, refreshMs: 100 },
+      async () => {
+        calls += 1;
+        return new Response(FIXTURE, { status: 200 });
+      }
+    );
+
+    expect(await refresher.refresh(1_000)).toBe(true);
+    expect(await refresher.refresh(1_050)).toBe(false);
+    expect(await refresher.refresh(1_100)).toBe(true);
+    expect(calls).toBe(2);
+  });
+
+  test("reports an attempted fetch as true even when it failed", async () => {
+    const refresher = createGoUsageRefresher(
+      { ...ENABLED_CONFIG.goUsage, refreshMs: 100 },
+      async () => {
+        throw new Error("network down");
+      }
+    );
+
+    expect(await refresher.refresh(1_000)).toBe(true);
+    expect(refresher.state.error).toBeDefined();
+  });
+
+  test("a notify-refresh listener cycle terminates once data is fresh", async () => {
+    let calls = 0;
+    const refresher = createGoUsageRefresher(
+      { ...ENABLED_CONFIG.goUsage, refreshMs: 100 },
+      async () => {
+        calls += 1;
+        return new Response(FIXTURE, { status: 200 });
+      }
+    );
+
+    let syncs = 0;
+    const cycle = async () => {
+      syncs += 1;
+      if (await refresher.refresh(1_000)) await cycle();
+    };
+    await cycle();
+
+    expect(syncs).toBe(2);
+    expect(calls).toBe(1);
+  });
+
   test("refetches after an error once the refresh interval has passed", async () => {
     let calls = 0;
     const refresher = createGoUsageRefresher(

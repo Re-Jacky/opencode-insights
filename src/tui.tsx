@@ -373,8 +373,7 @@ const tui: TuiPlugin = async (api, options) => {
   const goUsage = createGoUsageRefresher(config.goUsage);
 
   const refreshGoUsage = async () => {
-    await goUsage.refresh();
-    goUsageListeners.notify();
+    if (await goUsage.refresh()) goUsageListeners.notify();
   };
 
   const hydrateSessionMetrics = async (sessionID: string) => {
