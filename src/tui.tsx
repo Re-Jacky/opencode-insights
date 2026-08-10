@@ -7,6 +7,7 @@ import { createListenerRegistry, type Listener } from "./listeners.js";
 import { hasRenderStateChanged } from "./render-state.js";
 import {
   createGoUsageRefresher,
+  formatGoUsageRow,
   goUsageRows,
   goUsageSectionVisible,
   type GoUsageRow,
@@ -208,11 +209,7 @@ function renderGoUsageSidebar(
     if (rows && rows.length > 0) {
       for (const [index, row] of rows.entries()) {
         if (index > 0) chunks.push(textChunk("\n"));
-        const fill = Math.min(4, Math.ceil(row.usagePercent / 25));
-        const bar = "█".repeat(fill) + "░".repeat(4 - fill);
-        chunks.push(
-          textChunk(`  ${row.label.padEnd(7)}${row.usagePercent}% ${bar} ${row.reset}`, api.theme.current.textMuted)
-        );
+        chunks.push(textChunk(formatGoUsageRow(row), api.theme.current.textMuted));
       }
     } else if (error) {
       chunks.push(textChunk(`Go usage: ${error}`, api.theme.current.error));

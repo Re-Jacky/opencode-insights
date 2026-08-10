@@ -4,6 +4,7 @@ import {
   GoUsageError,
   createGoUsageRefresher,
   fetchGoUsage,
+  formatGoUsageRow,
   formatReset,
   goUsageRows,
   goUsageSectionVisible,
@@ -36,16 +37,16 @@ describe("goUsageRows", () => {
   test("renders a row per limit with percent and countdown reset", () => {
     const state = { data: parseGoUsageHtml(FIXTURE), lastFetchAt: 10_000 };
     expect(goUsageRows(state, 10_000)).toEqual([
-      { label: "Rolling", usagePercent: 12, reset: "2h33m" },
-      { label: "Weekly", usagePercent: 11, reset: "5d15h" },
-      { label: "Monthly", usagePercent: 27, reset: "1d17h" }
+      { label: "Rolling", usagePercent: 12, reset: "2h 33m" },
+      { label: "Weekly", usagePercent: 11, reset: "5d 15h" },
+      { label: "Monthly", usagePercent: 27, reset: "1d 17h" }
     ]);
   });
 
   test("counts the reset down as time passes since the fetch", () => {
     const state = { data: parseGoUsageHtml(FIXTURE), lastFetchAt: 10_000 };
     const rows = goUsageRows(state, 10_000 + 60_000);
-    expect(rows?.[0]?.reset).toBe("2h32m");
+    expect(rows?.[0]?.reset).toBe("2h 32m");
     expect(rows?.[0]?.usagePercent).toBe(12);
   });
 });
@@ -204,16 +205,39 @@ describe("formatReset", () => {
     expect(formatReset(3599)).toBe("59m");
   });
 
-  test("renders hours and minutes below one day", () => {
+  test("renders hours and minutes below one day with a space between units", () => {
     expect(formatReset(3600)).toBe("1h");
-    expect(formatReset(11619)).toBe("3h13m");
-    expect(formatReset(86399)).toBe("23h59m");
+    expect(formatReset(11619)).toBe("3h 13m");
+    expect(formatReset(86399)).toBe("23h 59m");
   });
 
-  test("renders days and hours above one day", () => {
+  test("renders days and hours above one day with a space between units", () => {
     expect(formatReset(86400)).toBe("1d");
-    expect(formatReset(149336)).toBe("1d17h");
-    expect(formatReset(487215)).toBe("5d15h");
+    expect(formatReset(149336)).toBe("1d 17h");
+    expect(formatReset(487215)).toBe("5d 15h");
+  });
+});
+
+describe("formatGoUsageRow", () => {
+  test("aligns label, percentage, bar and reset with generous spacing", () => {
+    expect(formatGoUsageRow({ label: "Rolling", usagePercent: 12, reset: "2h 33m" })).toBe(
+      "Rolling  12% █░░░ 2h 33m"
+    );
+  });
+
+  test("keeps the percentage column aligned for single and double digit values", () => {
+    expect(formatGoUsageRow({ label: "Weekly", usagePercent: 11, reset: "5d 15h" })).toBe(
+      "Weekly   11% █░░░ 5d 15h"
+    );
+    expect(formatGoUsageRow({ label: "Monthly", usagePercent: 27, reset: "1d 17h" })).toBe(
+      "Monthly  27% ██░░ 1d 17h"
+    );
+  });
+
+  test("fills the bar completely at 100 percent", () => {
+    expect(formatGoUsageRow({ label: "Rolling", usagePercent: 100, reset: "0m" })).toBe(
+      "Rolling  100% ████ 0m"
+    );
   });
 });
 
