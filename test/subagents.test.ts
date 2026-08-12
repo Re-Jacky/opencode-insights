@@ -1,4 +1,5 @@
 import { describe, expect, test } from "vitest";
+import { createActivityState, recordToolPart } from "../src/activity.js";
 import {
   applySubagentEvent,
   createSubagentState,
@@ -424,5 +425,68 @@ describe("subagent status", () => {
       "ses_running_old",
       "ses_done_recent"
     ]);
+  });
+});
+
+describe("subagent activity suffix", () => {
+  test("appends activity suffix to the row subtitle", () => {
+    const activity = createActivityState();
+    const state = createSubagentState(activity);
+    recordToolPart(activity, "ses_child_1", { id: "prt_1", tool: "bash" });
+    recordToolPart(activity, "ses_child_1", { id: "prt_2", tool: "read" });
+
+    applySubagentEvent(state, {
+      type: "session.updated",
+      properties: {
+        info: {
+          id: "ses_child_1",
+          parentID: "ses_parent",
+          title: "Review tests",
+          time: { created: 1_000 },
+          tokens: { input: 12, output: 8 }
+        }
+      }
+    });
+
+    expect(getSubagentSidebarModel(state, "ses_parent", { now: 6_000 })?.rows[0]?.subtitle).toBe(
+      "00:05 · ctx 20 tokens · 2 calls"
+    );
+  });
+
+  test("keeps subtitle unchanged when the subagent has no activity", () => {
+    const activity = createActivityState();
+    const state = createSubagentState(activity);
+
+    applySubagentEvent(state, {
+      type: "session.updated",
+      properties: {
+        info: {
+          id: "ses_child_1",
+          parentID: "ses_parent",
+          title: "Review tests",
+          time: { created: 1_000 },
+          tokens: { input: 12, output: 8 }
+        }
+      }
+    });
+
+    expect(getSubagentSidebarModel(state, "ses_parent", { now: 6_000 })?.rows[0]?.subtitle).toBe(
+      "00:05 · ctx 20 tokens"
+    );
+  });
+
+  test("attaches a live activity record created on demand", () => {
+    const activity = createActivityState();
+    const state = createSubagentState(activity);
+
+    applySubagentEvent(state, {
+      type: "session.updated",
+      properties: {
+        info: { id: "ses_child_1", parentID: "ses_parent", title: "X", time: { created: 1_000 } }
+      }
+    });
+
+    expect(activity.bySessionID["ses_child_1"]).toBeDefined();
+    expect(state.children["ses_child_1"]?.activity).toBe(activity.bySessionID["ses_child_1"]);
   });
 });

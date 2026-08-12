@@ -1,3 +1,5 @@
+import { emptyActivity, formatActivitySuffix, type ActivityState, type SessionActivity } from "./activity.js";
+
 export type SubagentStatus = "running" | "done" | "error";
 
 export type SubagentInfo = {
@@ -15,11 +17,13 @@ export type SubagentInfo = {
     total?: number | undefined;
     contextPercent?: number | undefined;
   } | undefined;
+  activity?: SessionActivity | undefined;
 };
 
 export type SubagentState = {
   children: Record<string, SubagentInfo>;
   totalExecuted: number;
+  activityStore?: ActivityState | undefined;
 };
 
 export type SubagentSidebarRow = {
@@ -46,8 +50,8 @@ type EventLike = {
   };
 };
 
-export function createSubagentState(): SubagentState {
-  return { children: {}, totalExecuted: 0 };
+export function createSubagentState(activityStore?: ActivityState): SubagentState {
+  return { children: {}, totalExecuted: 0, ...(activityStore ? { activityStore } : {}) };
 }
 
 export function applySubagentEvent(state: SubagentState, event: unknown) {
@@ -69,7 +73,8 @@ export function applySubagentEvent(state: SubagentState, event: unknown) {
     updatedAt: created.updatedAt,
     endedAt,
     elapsedMs: elapsedMs(startedAt, endedAt ?? created.updatedAt),
-    tokens: created.tokens ?? previous?.tokens
+    tokens: created.tokens ?? previous?.tokens,
+    activity: state.activityStore ? (state.activityStore.bySessionID[created.id] ??= emptyActivity()) : undefined
   };
 
   if (!previous) state.totalExecuted += 1;
@@ -151,7 +156,7 @@ export function getSubagentSidebarModel(
     rows: children.map((child) => ({
       id: child.id,
       title: formatSubagentTitle(child.title),
-      subtitle: [formatSubagentDuration(child, options.now), formatUsage(child)].filter(Boolean).join(" · "),
+      subtitle: [formatSubagentDuration(child, options.now), formatUsage(child), formatActivitySuffix(child.activity)].filter(Boolean).join(" · "),
       status: child.status
     }))
   };
