@@ -3,7 +3,7 @@ import {
   buildSessionAnalysisRows,
   createActivityState,
   emptyActivity,
-  formatActivityBrief,
+  formatActivityBriefRows,
   formatActivitySuffix,
   formatSubagentCount,
   hasActivity,
@@ -218,11 +218,19 @@ describe("activity formatting", () => {
     expect(formatActivitySuffix(a)).toBe("1 tool call · 1 auto-compact · 1 skill · 1 error");
   });
 
-  test("formatActivityBrief adds model requests before errors", () => {
-    const a = { ...emptyActivity(), toolCalls: 2, steps: 41, errors: 1 };
-    expect(formatActivityBrief(a)).toBe("2 tool calls · 41 model requests · 1 error");
-    expect(formatActivityBrief({ ...emptyActivity(), steps: 1 })).toBe("1 model request");
-    expect(formatActivityBrief(emptyActivity())).toBe("");
+  test("formatActivityBriefRows returns one row per metric with errors last", () => {
+    const a = { ...emptyActivity(), toolCalls: 18, autoCompacts: 2, errors: 1, skills: { brainstorming: 2, tdd: 1 }, steps: 41 };
+    expect(formatActivityBriefRows(a, 4)).toEqual([
+      "18 tool calls",
+      "2 auto-compacts",
+      "3 skills",
+      "41 model requests",
+      "4 subagents",
+      "1 error"
+    ]);
+    expect(formatActivityBriefRows({ ...emptyActivity(), steps: 1 }, 0)).toEqual(["1 model request"]);
+    expect(formatActivityBriefRows(emptyActivity(), 0)).toEqual([]);
+    expect(formatActivityBriefRows(undefined, 2)).toEqual(["2 subagents"]);
   });
 
   test("buildSessionAnalysisRows renders sections and the subagent tree", () => {
@@ -238,14 +246,14 @@ describe("activity formatting", () => {
     recordStep(state, "ses_a", "s1");
 
     expect(buildSessionAnalysisRows(state, "ses_root")).toEqual([
-      { text: "▾ Tool calls (2)", header: true },
-      { text: "  bash 1", header: false },
-      { text: "  read 1", header: false },
-      { text: "▾ Auto-compactions", header: true },
-      { text: "  1", header: false },
-      { text: "▾ Model requests (1)", header: true },
-      { text: "  1", header: false },
-      { text: "▾ Subagents", header: true },
+      { text: "Tool calls (2)", header: true },
+      { text: "  · bash 1", header: false },
+      { text: "  · read 1", header: false },
+      { text: "Auto-compactions", header: true },
+      { text: "  · 1", header: false },
+      { text: "Model requests (1)", header: true },
+      { text: "  · 1", header: false },
+      { text: "Subagents", header: true },
       { text: "  · T3: tightly-coupled fixtures  1 tool call · 1 auto-compact", header: false },
       { text: "    · child-of-T3", header: false }
     ]);
@@ -260,10 +268,10 @@ describe("activity formatting", () => {
       state: { status: "error", input: {}, error: "command exited with code 1" }
     });
     expect(buildSessionAnalysisRows(state, "ses_root")).toEqual([
-      { text: "▾ Tool calls (1)", header: true },
-      { text: "  bash 1", header: false },
-      { text: "▾ Tool errors (1)", header: true },
-      { text: "  bash — command exited with code 1", header: false }
+      { text: "Tool calls (1)", header: true },
+      { text: "  · bash 1", header: false },
+      { text: "Tool errors (1)", header: true },
+      { text: "  · bash — command exited with code 1", header: false }
     ]);
   });
 
@@ -272,10 +280,10 @@ describe("activity formatting", () => {
     state.titles["ses_root"] = "Main";
     recordToolPart(state, "ses_root", { id: "p1", tool: "bash", state: { status: "error", input: {} } });
     expect(buildSessionAnalysisRows(state, "ses_root")).toEqual([
-      { text: "▾ Tool calls (1)", header: true },
-      { text: "  bash 1", header: false },
-      { text: "▾ Tool errors (1)", header: true },
-      { text: "  1 error", header: false }
+      { text: "Tool calls (1)", header: true },
+      { text: "  · bash 1", header: false },
+      { text: "Tool errors (1)", header: true },
+      { text: "  · 1 error", header: false }
     ]);
   });
 

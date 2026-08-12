@@ -175,7 +175,7 @@ function pluralize(count: number, singular: string, plural?: string): string {
   return `${count} ${count === 1 ? singular : (plural ?? `${singular}s`)}`;
 }
 
-function formatActivityParts(a: SessionActivity | undefined, options: { includeModelRequests: boolean }): string {
+export function formatActivitySuffix(a: SessionActivity | undefined): string {
   if (!hasActivity(a)) return "";
   const parts: string[] = [];
   if (a && a.toolCalls > 0) parts.push(pluralize(a.toolCalls, "tool call"));
@@ -184,17 +184,23 @@ function formatActivityParts(a: SessionActivity | undefined, options: { includeM
     const total = Object.values(a.skills).reduce((sum, count) => sum + count, 0);
     parts.push(pluralize(total, "skill"));
   }
-  if (options.includeModelRequests && a && a.steps > 0) parts.push(pluralize(a.steps, "model request"));
   if (a && a.errors > 0) parts.push(pluralize(a.errors, "error"));
   return parts.join(" · ");
 }
 
-export function formatActivitySuffix(a: SessionActivity | undefined): string {
-  return formatActivityParts(a, { includeModelRequests: false });
-}
-
-export function formatActivityBrief(a: SessionActivity | undefined): string {
-  return formatActivityParts(a, { includeModelRequests: true });
+export function formatActivityBriefRows(a: SessionActivity | undefined, subagentCount: number): string[] {
+  if (!hasActivity(a) && subagentCount <= 0) return [];
+  const rows: string[] = [];
+  if (a && a.toolCalls > 0) rows.push(pluralize(a.toolCalls, "tool call"));
+  if (a && a.autoCompacts > 0) rows.push(pluralize(a.autoCompacts, "auto-compact"));
+  if (a && Object.keys(a.skills).length > 0) {
+    const total = Object.values(a.skills).reduce((sum, count) => sum + count, 0);
+    rows.push(pluralize(total, "skill"));
+  }
+  if (a && a.steps > 0) rows.push(pluralize(a.steps, "model request"));
+  if (subagentCount > 0) rows.push(pluralize(subagentCount, "subagent"));
+  if (a && a.errors > 0) rows.push(pluralize(a.errors, "error"));
+  return rows;
 }
 
 function truncateMiddle(value: string, maxLength: number): string {
@@ -217,6 +223,7 @@ function indent(lines: string[], depth: number): string[] {
 export type SessionAnalysisRow = {
   text: string;
   header: boolean;
+  key?: string | undefined;
 };
 
 export function treeSubagentCount(state: ActivityState, rootSessionID: string): number {
@@ -251,27 +258,27 @@ export function buildSessionAnalysisRows(state: ActivityState, rootSessionID: st
 
   const sections: Array<[string, string[]]> = [];
   if (tree.toolCalls > 0) {
-    sections.push([`▾ Tool calls (${tree.toolCalls})`, indent(sortedBreakdown(tree.toolBreakdown).map(([tool, count]) => `${tool} ${count}`), 1)]);
+    sections.push([`Tool calls (${tree.toolCalls})`, indent(sortedBreakdown(tree.toolBreakdown).map(([tool, count]) => `· ${tool} ${count}`), 1)]);
   }
   if (Object.keys(tree.skills).length > 0) {
     const total = Object.values(tree.skills).reduce((sum, count) => sum + count, 0);
-    sections.push([`▾ Skills (${total})`, indent(sortedBreakdown(tree.skills).map(([name, count]) => `${name} ${count}`), 1)]);
+    sections.push([`Skills (${total})`, indent(sortedBreakdown(tree.skills).map(([name, count]) => `· ${name} ${count}`), 1)]);
   }
   if (tree.autoCompacts > 0) {
-    sections.push([`▾ Auto-compactions`, [`  ${tree.autoCompacts}`]]);
+    sections.push([`Auto-compactions`, [`  · ${tree.autoCompacts}`]]);
   }
   if (tree.steps > 0) {
-    sections.push([`▾ Model requests (${tree.steps})`, [`  ${tree.steps}`]]);
+    sections.push([`Model requests (${tree.steps})`, [`  · ${tree.steps}`]]);
   }
   if (childIds.length > 0 && hasActivity(tree)) {
-    sections.push([`▾ Subagents`, rows]);
+    sections.push([`Subagents`, rows]);
   }
   if (tree.errors > 0) {
     const details =
       tree.errorDetails.length > 0
-        ? tree.errorDetails.map((detail) => `  ${truncateMiddle(detail.tool, 24)} — ${truncateMiddle(detail.message, 72)}`)
-        : [`  ${pluralize(tree.errors, "error")}`];
-    sections.push([`▾ Tool errors (${tree.errors})`, details]);
+        ? tree.errorDetails.map((detail) => `  · ${truncateMiddle(detail.tool, 24)} — ${truncateMiddle(detail.message, 72)}`)
+        : [`  · ${pluralize(tree.errors, "error")}`];
+    sections.push([`Tool errors (${tree.errors})`, details]);
   }
 
   return sections.flatMap(([title, body]) => [

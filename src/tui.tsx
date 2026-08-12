@@ -33,8 +33,7 @@ import {
 import {
   buildSessionAnalysisRows,
   createActivityState,
-  formatActivityBrief,
-  formatSubagentCount,
+  formatActivityBriefRows,
   recordChild,
   recordCompaction,
   recordStep,
@@ -42,7 +41,8 @@ import {
   treeActivity,
   treeLoading,
   treeSubagentCount,
-  type ActivityState
+  type ActivityState,
+  type SessionAnalysisRow
 } from "./activity.js";
 import { hydrateActivity, type ActivityClient } from "./activity-hydrate.js";
 import { useTerminalDimensions } from "@opentui/solid";
@@ -353,10 +353,13 @@ function renderSubagentStyledSidebar(
   return new StyledText(chunks);
 }
 
-function renderSessionAnalysisSidebar(line: string, api: TuiPluginApi, titleAttributes: number) {
+function renderSessionAnalysisSidebar(lines: string[], api: TuiPluginApi, titleAttributes: number) {
   const chunks: TextChunk[] = [
     textChunk(`Session Analysis\n`, api.theme.current.text, titleAttributes),
-    textChunk(line, api.theme.current.textMuted)
+    ...lines.flatMap((line, index) => [
+      ...(index > 0 ? [textChunk("\n")] : []),
+      textChunk(line, api.theme.current.textMuted)
+    ])
   ];
   return new StyledText(chunks);
 }
@@ -368,10 +371,32 @@ function SessionAnalysisDialog(props: {
 }) {
   const dimensions = useTerminalDimensions();
   const titleAttributes = createTextAttributes({ bold: true });
+  const [collapsedSections, setCollapsedSections] = createSignal<Set<string>>(new Set());
   const rows = buildSessionAnalysisRows(props.state, props.rootSessionID);
   const loading = treeLoading(props.state, props.rootSessionID);
   const maxHeight = Math.max(4, Math.floor(dimensions().height / 2) - 6);
   onMount(() => props.api.ui.dialog.setSize("large"));
+
+  const toggleSection = (header: string) => {
+    setCollapsedSections((previous) => {
+      const next = new Set(previous);
+      if (next.has(header)) next.delete(header);
+      else next.add(header);
+      return next;
+    });
+  };
+
+  const visibleRows: SessionAnalysisRow[] = [];
+  let currentHeader: string | undefined;
+  for (const row of rows) {
+    if (row.header) {
+      currentHeader = row.text;
+      visibleRows.push({ text: `${collapsedSections().has(row.text) ? "▶" : "▾"} ${row.text}`, header: true, key: row.text });
+    } else if (currentHeader === undefined || !collapsedSections().has(currentHeader)) {
+      visibleRows.push(row);
+    }
+  }
+
   return (
     <box flexDirection="column" flexGrow={1} paddingLeft={4} paddingRight={4} paddingTop={1}>
       <box flexDirection="row" justifyContent="space-between">
@@ -388,11 +413,12 @@ function SessionAnalysisDialog(props: {
         flexGrow={1}
         paddingTop={1}
       >
-        <For each={rows}>
+        <For each={visibleRows}>
           {(row) => (
             <text
               fg={row.header ? props.api.theme.current.text : props.api.theme.current.textMuted}
               {...(row.header ? { attributes: titleAttributes } : {})}
+              {...(row.header && row.key ? { onMouseUp: () => toggleSection(row.key ?? "") } : {})}
             >
               {row.text}
             </text>
@@ -428,13 +454,12 @@ function SessionAnalysisSidebar(props: {
     if (!text) return;
     const tree = treeActivity(props.state, props.sessionID);
     const loading = treeLoading(props.state, props.sessionID);
-    const brief = [formatActivityBrief(tree), formatSubagentCount(treeSubagentCount(props.state, props.sessionID))]
-      .filter(Boolean)
-      .join(" · ");
-    const line = loading ? (brief ? `${brief} · loading…` : "loading…") : brief;
-    const visible = line.length > 0;
+    const rows = formatActivityBriefRows(tree, treeSubagentCount(props.state, props.sessionID));
+    const lines = loading ? (rows.length > 0 ? [...rows, "loading…"] : ["loading…"]) : rows;
+    const visible = lines.length > 0;
+    const content = lines.join("\n");
     const next: { content: string; visible: boolean; height: number | "auto" } = {
-      content: line,
+      content,
       visible,
       height: visible ? "auto" : 0
     };
@@ -442,7 +467,7 @@ function SessionAnalysisSidebar(props: {
     previous = next;
     text.visible = next.visible;
     text.height = next.height;
-    text.content = visible ? renderSessionAnalysisSidebar(line, props.api, titleAttributes) : "";
+    text.content = visible ? renderSessionAnalysisSidebar(lines, props.api, titleAttributes) : "";
     props.api.renderer.requestRender();
   };
 
