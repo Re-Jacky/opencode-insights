@@ -1,8 +1,8 @@
 export type SessionActivity = {
   toolCalls: number;
   toolBreakdown: Record<string, number>;
-  errors: number;
-  errorDetails: Array<{ tool: string; message: string }>;
+  warnings: number;
+  warningDetails: Array<{ tool: string; message: string }>;
   skills: Record<string, number>;
   autoCompacts: number;
   steps: number;
@@ -29,14 +29,14 @@ export function createActivityState(): ActivityState {
 }
 
 export function emptyActivity(): SessionActivity {
-  return { toolCalls: 0, toolBreakdown: {}, errors: 0, errorDetails: [], skills: {}, autoCompacts: 0, steps: 0 };
+  return { toolCalls: 0, toolBreakdown: {}, warnings: 0, warningDetails: [], skills: {}, autoCompacts: 0, steps: 0 };
 }
 
 export function hasActivity(a: SessionActivity | undefined): boolean {
   if (!a) return false;
   return (
     a.toolCalls > 0 ||
-    a.errors > 0 ||
+    a.warnings > 0 ||
     a.autoCompacts > 0 ||
     a.steps > 0 ||
     Object.keys(a.skills).length > 0
@@ -87,10 +87,10 @@ export function recordToolPart(
   }
   const partState = part.state;
   if (partState?.status === "error" && part.id !== undefined) {
-    if (!seen(state, sessionID, `error:${part.id}`)) {
-      activity.errors += 1;
+    if (!seen(state, sessionID, `warning:${part.id}`)) {
+      activity.warnings += 1;
       if (typeof partState.error === "string" && partState.error.length > 0) {
-        activity.errorDetails.push({ tool: part.tool, message: partState.error });
+        activity.warningDetails.push({ tool: part.tool, message: partState.error });
       }
     }
   }
@@ -125,7 +125,7 @@ export function mergeActivity(...activities: SessionActivity[]): SessionActivity
   const result = emptyActivity();
   for (const activity of activities) {
     result.toolCalls += activity.toolCalls;
-    result.errors += activity.errors;
+    result.warnings += activity.warnings;
     result.autoCompacts += activity.autoCompacts;
     result.steps += activity.steps;
     for (const [tool, count] of Object.entries(activity.toolBreakdown)) {
@@ -134,8 +134,8 @@ export function mergeActivity(...activities: SessionActivity[]): SessionActivity
     for (const [name, count] of Object.entries(activity.skills)) {
       result.skills[name] = (result.skills[name] ?? 0) + count;
     }
-    for (const detail of activity.errorDetails) {
-      result.errorDetails.push(detail);
+    for (const detail of activity.warningDetails) {
+      result.warningDetails.push(detail);
     }
   }
   return result;
@@ -184,7 +184,7 @@ export function formatActivitySuffix(a: SessionActivity | undefined): string {
     const total = Object.values(a.skills).reduce((sum, count) => sum + count, 0);
     parts.push(pluralize(total, "skill"));
   }
-  if (a && a.errors > 0) parts.push(pluralize(a.errors, "error"));
+  if (a && a.warnings > 0) parts.push(pluralize(a.warnings, "warning"));
   return parts.join(" · ");
 }
 
@@ -199,7 +199,7 @@ export function formatActivityBriefRows(a: SessionActivity | undefined, subagent
   }
   if (a && a.steps > 0) rows.push(pluralize(a.steps, "model request"));
   if (subagentCount > 0) rows.push(pluralize(subagentCount, "subagent"));
-  if (a && a.errors > 0) rows.push(pluralize(a.errors, "error"));
+  if (a && a.warnings > 0) rows.push(pluralize(a.warnings, "warning"));
   return rows;
 }
 
@@ -273,12 +273,12 @@ export function buildSessionAnalysisRows(state: ActivityState, rootSessionID: st
   if (childIds.length > 0 && hasActivity(tree)) {
     sections.push([`Subagents`, rows]);
   }
-  if (tree.errors > 0) {
+  if (tree.warnings > 0) {
     const details =
-      tree.errorDetails.length > 0
-        ? tree.errorDetails.map((detail) => `  · ${truncateMiddle(detail.tool, 24)} — ${truncateMiddle(detail.message, 72)}`)
-        : [`  · ${pluralize(tree.errors, "error")}`];
-    sections.push([`Tool errors (${tree.errors})`, details]);
+      tree.warningDetails.length > 0
+        ? tree.warningDetails.map((detail) => `  · ${truncateMiddle(detail.tool, 24)} — ${truncateMiddle(detail.message, 72)}`)
+        : [`  · ${pluralize(tree.warnings, "warning")}`];
+    sections.push([`Tool warnings (${tree.warnings})`, details]);
   }
 
   return sections.flatMap(([title, body]) => [

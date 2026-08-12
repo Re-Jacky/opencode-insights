@@ -33,11 +33,11 @@ describe("activity state", () => {
     const zero = emptyActivity();
     expect(hasActivity(zero)).toBe(false);
     expect(hasActivity({ ...zero, toolCalls: 1 })).toBe(true);
-    expect(hasActivity({ ...zero, errors: 1 })).toBe(true);
+    expect(hasActivity({ ...zero, warnings: 1 })).toBe(true);
     expect(hasActivity({ ...zero, autoCompacts: 1 })).toBe(true);
     expect(hasActivity({ ...zero, steps: 1 })).toBe(true);
     expect(hasActivity({ ...zero, skills: { brainstorming: 1 } })).toBe(true);
-    expect(zero.errorDetails).toEqual([]);
+    expect(zero.warningDetails).toEqual([]);
   });
 
   test("recordChild appends to the parent list without duplicates", () => {
@@ -58,35 +58,35 @@ describe("activity state", () => {
     expect(state.bySessionID["ses_a"]?.toolBreakdown).toEqual({ bash: 1 });
   });
 
-  test("recordToolPart counts an error on the last sighting without double counting", () => {
+  test("recordToolPart counts a warning on the last sighting without double counting", () => {
     const state = createActivityState();
     const id = "prt_fail";
     recordToolPart(state, "ses_a", { id, tool: "bash", state: { status: "pending", input: {} } });
     recordToolPart(state, "ses_a", { id, tool: "bash", state: { status: "error", input: {} } });
     recordToolPart(state, "ses_a", { id, tool: "bash", state: { status: "error", input: {} } });
     expect(state.bySessionID["ses_a"]?.toolCalls).toBe(1);
-    expect(state.bySessionID["ses_a"]?.errors).toBe(1);
+    expect(state.bySessionID["ses_a"]?.warnings).toBe(1);
   });
 
-  test("recordToolPart captures the tool name and error message", () => {
+  test("recordToolPart captures the tool name and warning message", () => {
     const state = createActivityState();
     recordToolPart(state, "ses_a", {
       id: "prt_fail",
       tool: "bash",
       state: { status: "error", input: {}, error: "command exited with code 1" }
     });
-    expect(state.bySessionID["ses_a"]?.errors).toBe(1);
-    expect(state.bySessionID["ses_a"]?.errorDetails).toEqual([
+    expect(state.bySessionID["ses_a"]?.warnings).toBe(1);
+    expect(state.bySessionID["ses_a"]?.warningDetails).toEqual([
       { tool: "bash", message: "command exited with code 1" }
     ]);
   });
 
-  test("recordToolPart keeps a single error detail per part id", () => {
+  test("recordToolPart keeps a single warning detail per part id", () => {
     const state = createActivityState();
     const sighting = { id: "prt_fail", tool: "bash", state: { status: "error", input: {}, error: "boom" } };
     recordToolPart(state, "ses_a", sighting);
     recordToolPart(state, "ses_a", sighting);
-    expect(state.bySessionID["ses_a"]?.errorDetails).toHaveLength(1);
+    expect(state.bySessionID["ses_a"]?.warningDetails).toHaveLength(1);
   });
 
   test("recordToolPart extracts skill names only when present", () => {
@@ -139,16 +139,16 @@ describe("activity state", () => {
 
 describe("activity merge and tree", () => {
   test("mergeActivity sums every metric and merges breakdowns", () => {
-    const a = { ...emptyActivity(), toolCalls: 3, errors: 1, autoCompacts: 2, steps: 5, toolBreakdown: { bash: 2, read: 1 }, skills: { brainstorming: 1 }, errorDetails: [{ tool: "bash", message: "boom" }] };
-    const b = { ...emptyActivity(), toolCalls: 4, errors: 0, autoCompacts: 1, steps: 0, toolBreakdown: { bash: 3, write: 1 }, skills: { brainstorming: 2, tdd: 1 } };
+    const a = { ...emptyActivity(), toolCalls: 3, warnings: 1, autoCompacts: 2, steps: 5, toolBreakdown: { bash: 2, read: 1 }, skills: { brainstorming: 1 }, warningDetails: [{ tool: "bash", message: "boom" }] };
+    const b = { ...emptyActivity(), toolCalls: 4, warnings: 0, autoCompacts: 1, steps: 0, toolBreakdown: { bash: 3, write: 1 }, skills: { brainstorming: 2, tdd: 1 } };
     const merged = mergeActivity(a, b);
     expect(merged.toolCalls).toBe(7);
-    expect(merged.errors).toBe(1);
+    expect(merged.warnings).toBe(1);
     expect(merged.autoCompacts).toBe(3);
     expect(merged.steps).toBe(5);
     expect(merged.toolBreakdown).toEqual({ bash: 5, read: 1, write: 1 });
     expect(merged.skills).toEqual({ brainstorming: 3, tdd: 1 });
-    expect(merged.errorDetails).toEqual([{ tool: "bash", message: "boom" }]);
+    expect(merged.warningDetails).toEqual([{ tool: "bash", message: "boom" }]);
   });
 
   test("mergeActivity with no args is empty", () => {
@@ -205,28 +205,28 @@ describe("activity merge and tree", () => {
 });
 
 describe("activity formatting", () => {
-  test("formatActivitySuffix omits zero values, pluralizes, and puts errors last", () => {
-    const a = { ...emptyActivity(), toolCalls: 18, autoCompacts: 2, errors: 1, skills: { brainstorming: 2, tdd: 1 } };
-    expect(formatActivitySuffix(a)).toBe("18 tool calls · 2 auto-compacts · 3 skills · 1 error");
+  test("formatActivitySuffix omits zero values, pluralizes, and puts warnings last", () => {
+    const a = { ...emptyActivity(), toolCalls: 18, autoCompacts: 2, warnings: 1, skills: { brainstorming: 2, tdd: 1 } };
+    expect(formatActivitySuffix(a)).toBe("18 tool calls · 2 auto-compacts · 3 skills · 1 warning");
     expect(formatActivitySuffix({ ...emptyActivity(), toolCalls: 1 })).toBe("1 tool call");
     expect(formatActivitySuffix(emptyActivity())).toBe("");
     expect(formatActivitySuffix(undefined)).toBe("");
   });
 
-  test("formatActivitySuffix ordering is tool calls, auto-compacts, skills, errors", () => {
-    const a = { ...emptyActivity(), autoCompacts: 1, errors: 1, toolCalls: 1, skills: { tdd: 1 } };
-    expect(formatActivitySuffix(a)).toBe("1 tool call · 1 auto-compact · 1 skill · 1 error");
+  test("formatActivitySuffix ordering is tool calls, auto-compacts, skills, warnings", () => {
+    const a = { ...emptyActivity(), autoCompacts: 1, warnings: 1, toolCalls: 1, skills: { tdd: 1 } };
+    expect(formatActivitySuffix(a)).toBe("1 tool call · 1 auto-compact · 1 skill · 1 warning");
   });
 
-  test("formatActivityBriefRows returns one row per metric with errors last", () => {
-    const a = { ...emptyActivity(), toolCalls: 18, autoCompacts: 2, errors: 1, skills: { brainstorming: 2, tdd: 1 }, steps: 41 };
+  test("formatActivityBriefRows returns one row per metric with warnings last", () => {
+    const a = { ...emptyActivity(), toolCalls: 18, autoCompacts: 2, warnings: 1, skills: { brainstorming: 2, tdd: 1 }, steps: 41 };
     expect(formatActivityBriefRows(a, 4)).toEqual([
       "18 tool calls",
       "2 auto-compacts",
       "3 skills",
       "41 model requests",
       "4 subagents",
-      "1 error"
+      "1 warning"
     ]);
     expect(formatActivityBriefRows({ ...emptyActivity(), steps: 1 }, 0)).toEqual(["1 model request"]);
     expect(formatActivityBriefRows(emptyActivity(), 0)).toEqual([]);
@@ -259,7 +259,7 @@ describe("activity formatting", () => {
     ]);
   });
 
-  test("buildSessionAnalysisRows lists error details at the bottom", () => {
+  test("buildSessionAnalysisRows lists warning details at the bottom", () => {
     const state = createActivityState();
     state.titles["ses_root"] = "Main";
     recordToolPart(state, "ses_root", {
@@ -270,20 +270,20 @@ describe("activity formatting", () => {
     expect(buildSessionAnalysisRows(state, "ses_root")).toEqual([
       { text: "Tool calls (1)", header: true },
       { text: "  · bash 1", header: false },
-      { text: "Tool errors (1)", header: true },
+      { text: "Tool warnings (1)", header: true },
       { text: "  · bash — command exited with code 1", header: false }
     ]);
   });
 
-  test("buildSessionAnalysisRows falls back to a count when error details are absent", () => {
+  test("buildSessionAnalysisRows falls back to a count when warning details are absent", () => {
     const state = createActivityState();
     state.titles["ses_root"] = "Main";
     recordToolPart(state, "ses_root", { id: "p1", tool: "bash", state: { status: "error", input: {} } });
     expect(buildSessionAnalysisRows(state, "ses_root")).toEqual([
       { text: "Tool calls (1)", header: true },
       { text: "  · bash 1", header: false },
-      { text: "Tool errors (1)", header: true },
-      { text: "  · 1 error", header: false }
+      { text: "Tool warnings (1)", header: true },
+      { text: "  · 1 warning", header: false }
     ]);
   });
 

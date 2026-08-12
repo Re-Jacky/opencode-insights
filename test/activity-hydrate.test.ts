@@ -58,7 +58,7 @@ describe("hydrateActivity", () => {
   test("does not double count parts seen live before backfill", async () => {
     const state = createActivityState();
     // part seen live (identical id)
-    state.bySessionID["ses_a"] = { toolCalls: 1, toolBreakdown: { bash: 1 }, errors: 0, errorDetails: [], skills: {}, autoCompacts: 0, steps: 0 };
+    state.bySessionID["ses_a"] = { toolCalls: 1, toolBreakdown: { bash: 1 }, warnings: 0, warningDetails: [], skills: {}, autoCompacts: 0, steps: 0 };
     state.seenKeys["ses_a"] = new Set(["tool:prt_t1"]);
     const client = makeClient({
       list: async () => ({ data: [{ id: "ses_root", title: "Main" }, { id: "ses_a", parentID: "ses_root", title: "T3" }] }),
@@ -70,7 +70,7 @@ describe("hydrateActivity", () => {
     expect(state.bySessionID["ses_a"]?.toolCalls).toBe(1);
   });
 
-  test("backfills error messages from tool part state", async () => {
+  test("backfills warning messages from tool part state", async () => {
     const state = createActivityState();
     const client = makeClient({
       list: async () => ({ data: [{ id: "ses_root", title: "Main" }, { id: "ses_a", parentID: "ses_root", title: "T3" }] }),
@@ -81,8 +81,8 @@ describe("hydrateActivity", () => {
       })
     });
     await hydrateActivity(client, state, "ses_root");
-    expect(state.bySessionID["ses_a"]?.errors).toBe(1);
-    expect(state.bySessionID["ses_a"]?.errorDetails).toEqual([
+    expect(state.bySessionID["ses_a"]?.warnings).toBe(1);
+    expect(state.bySessionID["ses_a"]?.warningDetails).toEqual([
       { tool: "bash", message: "command exited with code 1" }
     ]);
   });
