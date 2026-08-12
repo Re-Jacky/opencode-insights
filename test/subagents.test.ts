@@ -449,7 +449,7 @@ describe("subagent activity suffix", () => {
     });
 
     expect(getSubagentSidebarModel(state, "ses_parent", { now: 6_000 })?.rows[0]?.subtitle).toBe(
-      "00:05 · ctx 20 tokens · 2 calls"
+      "00:05 · ctx 20 tokens · 2 tool calls"
     );
   });
 

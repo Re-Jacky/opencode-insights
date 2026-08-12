@@ -37,6 +37,7 @@ describe("activity state", () => {
     expect(hasActivity({ ...zero, autoCompacts: 1 })).toBe(true);
     expect(hasActivity({ ...zero, steps: 1 })).toBe(true);
     expect(hasActivity({ ...zero, skills: { brainstorming: 1 } })).toBe(true);
+    expect(zero.errorDetails).toEqual([]);
   });
 
   test("recordChild appends to the parent list without duplicates", () => {
@@ -65,6 +66,27 @@ describe("activity state", () => {
     recordToolPart(state, "ses_a", { id, tool: "bash", state: { status: "error", input: {} } });
     expect(state.bySessionID["ses_a"]?.toolCalls).toBe(1);
     expect(state.bySessionID["ses_a"]?.errors).toBe(1);
+  });
+
+  test("recordToolPart captures the tool name and error message", () => {
+    const state = createActivityState();
+    recordToolPart(state, "ses_a", {
+      id: "prt_fail",
+      tool: "bash",
+      state: { status: "error", input: {}, error: "command exited with code 1" }
+    });
+    expect(state.bySessionID["ses_a"]?.errors).toBe(1);
+    expect(state.bySessionID["ses_a"]?.errorDetails).toEqual([
+      { tool: "bash", message: "command exited with code 1" }
+    ]);
+  });
+
+  test("recordToolPart keeps a single error detail per part id", () => {
+    const state = createActivityState();
+    const sighting = { id: "prt_fail", tool: "bash", state: { status: "error", input: {}, error: "boom" } };
+    recordToolPart(state, "ses_a", sighting);
+    recordToolPart(state, "ses_a", sighting);
+    expect(state.bySessionID["ses_a"]?.errorDetails).toHaveLength(1);
   });
 
   test("recordToolPart extracts skill names only when present", () => {
@@ -117,7 +139,7 @@ describe("activity state", () => {
 
 describe("activity merge and tree", () => {
   test("mergeActivity sums every metric and merges breakdowns", () => {
-    const a = { ...emptyActivity(), toolCalls: 3, errors: 1, autoCompacts: 2, steps: 5, toolBreakdown: { bash: 2, read: 1 }, skills: { brainstorming: 1 } };
+    const a = { ...emptyActivity(), toolCalls: 3, errors: 1, autoCompacts: 2, steps: 5, toolBreakdown: { bash: 2, read: 1 }, skills: { brainstorming: 1 }, errorDetails: [{ tool: "bash", message: "boom" }] };
     const b = { ...emptyActivity(), toolCalls: 4, errors: 0, autoCompacts: 1, steps: 0, toolBreakdown: { bash: 3, write: 1 }, skills: { brainstorming: 2, tdd: 1 } };
     const merged = mergeActivity(a, b);
     expect(merged.toolCalls).toBe(7);
@@ -126,6 +148,7 @@ describe("activity merge and tree", () => {
     expect(merged.steps).toBe(5);
     expect(merged.toolBreakdown).toEqual({ bash: 5, read: 1, write: 1 });
     expect(merged.skills).toEqual({ brainstorming: 3, tdd: 1 });
+    expect(merged.errorDetails).toEqual([{ tool: "bash", message: "boom" }]);
   });
 
   test("mergeActivity with no args is empty", () => {
@@ -182,22 +205,23 @@ describe("activity merge and tree", () => {
 });
 
 describe("activity formatting", () => {
-  test("formatActivitySuffix omits zero values and pluralizes", () => {
+  test("formatActivitySuffix omits zero values, pluralizes, and puts errors last", () => {
     const a = { ...emptyActivity(), toolCalls: 18, autoCompacts: 2, errors: 1, skills: { brainstorming: 2, tdd: 1 } };
-    expect(formatActivitySuffix(a)).toBe("18 calls · 2 auto-compacts · 1 error · 3 skills");
-    expect(formatActivitySuffix({ ...emptyActivity(), toolCalls: 1 })).toBe("1 call");
+    expect(formatActivitySuffix(a)).toBe("18 tool calls · 2 auto-compacts · 3 skills · 1 error");
+    expect(formatActivitySuffix({ ...emptyActivity(), toolCalls: 1 })).toBe("1 tool call");
     expect(formatActivitySuffix(emptyActivity())).toBe("");
     expect(formatActivitySuffix(undefined)).toBe("");
   });
 
-  test("formatActivitySuffix ordering is calls, auto-compacts, errors, skills", () => {
+  test("formatActivitySuffix ordering is tool calls, auto-compacts, skills, errors", () => {
     const a = { ...emptyActivity(), autoCompacts: 1, errors: 1, toolCalls: 1, skills: { tdd: 1 } };
-    expect(formatActivitySuffix(a)).toBe("1 call · 1 auto-compact · 1 error · 1 skill");
+    expect(formatActivitySuffix(a)).toBe("1 tool call · 1 auto-compact · 1 skill · 1 error");
   });
 
-  test("formatActivityBrief matches the suffix", () => {
-    const a = { ...emptyActivity(), toolCalls: 2 };
-    expect(formatActivityBrief(a)).toBe(formatActivitySuffix(a));
+  test("formatActivityBrief adds model requests before errors", () => {
+    const a = { ...emptyActivity(), toolCalls: 2, steps: 41, errors: 1 };
+    expect(formatActivityBrief(a)).toBe("2 tool calls · 41 model requests · 1 error");
+    expect(formatActivityBrief({ ...emptyActivity(), steps: 1 })).toBe("1 model request");
     expect(formatActivityBrief(emptyActivity())).toBe("");
   });
 
@@ -214,28 +238,44 @@ describe("activity formatting", () => {
     recordStep(state, "ses_a", "s1");
 
     expect(buildSessionAnalysisRows(state, "ses_root")).toEqual([
-      { text: "▾ Tools (2)", header: true },
+      { text: "▾ Tool calls (2)", header: true },
       { text: "  bash 1", header: false },
       { text: "  read 1", header: false },
       { text: "▾ Auto-compactions", header: true },
       { text: "  1", header: false },
-      { text: "▾ Model calls (steps)", header: true },
+      { text: "▾ Model requests (1)", header: true },
       { text: "  1", header: false },
       { text: "▾ Subagents", header: true },
-      { text: "  · T3: tightly-coupled fixtures  1 call · 1 auto-compact", header: false },
+      { text: "  · T3: tightly-coupled fixtures  1 tool call · 1 auto-compact", header: false },
       { text: "    · child-of-T3", header: false }
     ]);
   });
 
-  test("buildSessionAnalysisRows omits zero sections and errors section", () => {
+  test("buildSessionAnalysisRows lists error details at the bottom", () => {
+    const state = createActivityState();
+    state.titles["ses_root"] = "Main";
+    recordToolPart(state, "ses_root", {
+      id: "p1",
+      tool: "bash",
+      state: { status: "error", input: {}, error: "command exited with code 1" }
+    });
+    expect(buildSessionAnalysisRows(state, "ses_root")).toEqual([
+      { text: "▾ Tool calls (1)", header: true },
+      { text: "  bash 1", header: false },
+      { text: "▾ Tool errors (1)", header: true },
+      { text: "  bash — command exited with code 1", header: false }
+    ]);
+  });
+
+  test("buildSessionAnalysisRows falls back to a count when error details are absent", () => {
     const state = createActivityState();
     state.titles["ses_root"] = "Main";
     recordToolPart(state, "ses_root", { id: "p1", tool: "bash", state: { status: "error", input: {} } });
     expect(buildSessionAnalysisRows(state, "ses_root")).toEqual([
-      { text: "▾ Tools (1)", header: true },
+      { text: "▾ Tool calls (1)", header: true },
       { text: "  bash 1", header: false },
-      { text: "▾ Tool errors", header: true },
-      { text: "  1", header: false }
+      { text: "▾ Tool errors (1)", header: true },
+      { text: "  1 error", header: false }
     ]);
   });
 

@@ -659,6 +659,13 @@ const tui: TuiPlugin = async (api, options) => {
       ),
       sidebar_content: (_ctx, props) => (
         <>
+          <SessionAnalysisSidebar
+            api={api}
+            sessionID={props.session_id}
+            state={activity}
+            subscribe={activityListeners.subscribe}
+            hydrate={() => void hydrateActivity(api.client as unknown as ActivityClient, activity, props.session_id).then(() => activityListeners.notify())}
+          />
           <TokenUsageSidebar
             api={api}
             sessionID={props.session_id}
@@ -681,13 +688,6 @@ const tui: TuiPlugin = async (api, options) => {
             sessionID={props.session_id}
             state={subagents}
             subscribe={subagentListeners.subscribe}
-          />
-          <SessionAnalysisSidebar
-            api={api}
-            sessionID={props.session_id}
-            state={activity}
-            subscribe={activityListeners.subscribe}
-            hydrate={() => void hydrateActivity(api.client as unknown as ActivityClient, activity, props.session_id).then(() => activityListeners.notify())}
           />
         </>
       )

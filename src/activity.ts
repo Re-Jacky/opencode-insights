@@ -2,6 +2,7 @@ export type SessionActivity = {
   toolCalls: number;
   toolBreakdown: Record<string, number>;
   errors: number;
+  errorDetails: Array<{ tool: string; message: string }>;
   skills: Record<string, number>;
   autoCompacts: number;
   steps: number;
@@ -28,7 +29,7 @@ export function createActivityState(): ActivityState {
 }
 
 export function emptyActivity(): SessionActivity {
-  return { toolCalls: 0, toolBreakdown: {}, errors: 0, skills: {}, autoCompacts: 0, steps: 0 };
+  return { toolCalls: 0, toolBreakdown: {}, errors: 0, errorDetails: [], skills: {}, autoCompacts: 0, steps: 0 };
 }
 
 export function hasActivity(a: SessionActivity | undefined): boolean {
@@ -69,7 +70,7 @@ function seen(state: ActivityState, sessionID: string, key: string): boolean {
 export function recordToolPart(
   state: ActivityState,
   sessionID: string,
-  part: { id?: string; tool: string; state?: { status?: string; input?: { name?: string } } }
+  part: { id?: string; tool: string; state?: { status?: string; input?: { name?: string }; error?: string } }
 ): boolean {
   const activity = activityFor(state, sessionID);
   let counted = false;
@@ -86,7 +87,12 @@ export function recordToolPart(
   }
   const partState = part.state;
   if (partState?.status === "error" && part.id !== undefined) {
-    if (!seen(state, sessionID, `error:${part.id}`)) activity.errors += 1;
+    if (!seen(state, sessionID, `error:${part.id}`)) {
+      activity.errors += 1;
+      if (typeof partState.error === "string" && partState.error.length > 0) {
+        activity.errorDetails.push({ tool: part.tool, message: partState.error });
+      }
+    }
   }
   if (part.tool === "skill" && partState?.input && typeof partState.input.name === "string" && partState.input.name.length > 0) {
     if (part.id !== undefined) {
@@ -128,6 +134,9 @@ export function mergeActivity(...activities: SessionActivity[]): SessionActivity
     for (const [name, count] of Object.entries(activity.skills)) {
       result.skills[name] = (result.skills[name] ?? 0) + count;
     }
+    for (const detail of activity.errorDetails) {
+      result.errorDetails.push(detail);
+    }
   }
   return result;
 }
@@ -166,21 +175,26 @@ function pluralize(count: number, singular: string, plural?: string): string {
   return `${count} ${count === 1 ? singular : (plural ?? `${singular}s`)}`;
 }
 
-export function formatActivitySuffix(a: SessionActivity | undefined): string {
+function formatActivityParts(a: SessionActivity | undefined, options: { includeModelRequests: boolean }): string {
   if (!hasActivity(a)) return "";
   const parts: string[] = [];
-  if (a && a.toolCalls > 0) parts.push(pluralize(a.toolCalls, "call"));
+  if (a && a.toolCalls > 0) parts.push(pluralize(a.toolCalls, "tool call"));
   if (a && a.autoCompacts > 0) parts.push(pluralize(a.autoCompacts, "auto-compact"));
-  if (a && a.errors > 0) parts.push(pluralize(a.errors, "error"));
   if (a && Object.keys(a.skills).length > 0) {
     const total = Object.values(a.skills).reduce((sum, count) => sum + count, 0);
     parts.push(pluralize(total, "skill"));
   }
+  if (options.includeModelRequests && a && a.steps > 0) parts.push(pluralize(a.steps, "model request"));
+  if (a && a.errors > 0) parts.push(pluralize(a.errors, "error"));
   return parts.join(" · ");
 }
 
+export function formatActivitySuffix(a: SessionActivity | undefined): string {
+  return formatActivityParts(a, { includeModelRequests: false });
+}
+
 export function formatActivityBrief(a: SessionActivity | undefined): string {
-  return formatActivitySuffix(a);
+  return formatActivityParts(a, { includeModelRequests: true });
 }
 
 function truncateMiddle(value: string, maxLength: number): string {
@@ -237,7 +251,7 @@ export function buildSessionAnalysisRows(state: ActivityState, rootSessionID: st
 
   const sections: Array<[string, string[]]> = [];
   if (tree.toolCalls > 0) {
-    sections.push([`▾ Tools (${tree.toolCalls})`, indent(sortedBreakdown(tree.toolBreakdown).map(([tool, count]) => `${tool} ${count}`), 1)]);
+    sections.push([`▾ Tool calls (${tree.toolCalls})`, indent(sortedBreakdown(tree.toolBreakdown).map(([tool, count]) => `${tool} ${count}`), 1)]);
   }
   if (Object.keys(tree.skills).length > 0) {
     const total = Object.values(tree.skills).reduce((sum, count) => sum + count, 0);
@@ -246,14 +260,18 @@ export function buildSessionAnalysisRows(state: ActivityState, rootSessionID: st
   if (tree.autoCompacts > 0) {
     sections.push([`▾ Auto-compactions`, [`  ${tree.autoCompacts}`]]);
   }
-  if (tree.errors > 0) {
-    sections.push([`▾ Tool errors`, [`  ${tree.errors}`]]);
-  }
   if (tree.steps > 0) {
-    sections.push([`▾ Model calls (steps)`, [`  ${tree.steps}`]]);
+    sections.push([`▾ Model requests (${tree.steps})`, [`  ${tree.steps}`]]);
   }
   if (childIds.length > 0 && hasActivity(tree)) {
     sections.push([`▾ Subagents`, rows]);
+  }
+  if (tree.errors > 0) {
+    const details =
+      tree.errorDetails.length > 0
+        ? tree.errorDetails.map((detail) => `  ${truncateMiddle(detail.tool, 24)} — ${truncateMiddle(detail.message, 72)}`)
+        : [`  ${pluralize(tree.errors, "error")}`];
+    sections.push([`▾ Tool errors (${tree.errors})`, details]);
   }
 
   return sections.flatMap(([title, body]) => [

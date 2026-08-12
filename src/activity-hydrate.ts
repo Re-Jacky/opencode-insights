@@ -55,7 +55,7 @@ function applyParts(state: ActivityState, sessionID: string, parts: Array<Record
         ...(id !== undefined ? { id } : {}),
         tool: part.tool,
         ...(typeof part.state === "object" && part.state !== null && !Array.isArray(part.state)
-          ? { state: part.state as { status?: string; input?: { name?: string } } }
+          ? { state: part.state as { status?: string; input?: { name?: string }; error?: string } }
           : {})
       });
     } else if (type === "compaction" && id !== undefined) {
