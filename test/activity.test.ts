@@ -1,7 +1,10 @@
 import { describe, expect, test } from "vitest";
 import {
+  buildSessionAnalysisRows,
   createActivityState,
   emptyActivity,
+  formatActivityBrief,
+  formatActivitySuffix,
   hasActivity,
   mergeActivity,
   recordChild,
@@ -173,5 +176,64 @@ describe("activity merge and tree", () => {
     expect(treeLoading(state, "ses_root")).toBe(true);
     state.loading.delete("ses_a");
     expect(treeLoading(state, "ses_root")).toBe(false);
+  });
+});
+
+describe("activity formatting", () => {
+  test("formatActivitySuffix omits zero values and pluralizes", () => {
+    const a = { ...emptyActivity(), toolCalls: 18, autoCompacts: 2, errors: 1, skills: { brainstorming: 2, tdd: 1 } };
+    expect(formatActivitySuffix(a)).toBe("18 calls · 2 auto-compacts · 1 error · 3 skills");
+    expect(formatActivitySuffix({ ...emptyActivity(), toolCalls: 1 })).toBe("1 call");
+    expect(formatActivitySuffix(emptyActivity())).toBe("");
+    expect(formatActivitySuffix(undefined)).toBe("");
+  });
+
+  test("formatActivitySuffix ordering is calls, auto-compacts, errors, skills", () => {
+    const a = { ...emptyActivity(), autoCompacts: 1, errors: 1, toolCalls: 1, skills: { tdd: 1 } };
+    expect(formatActivitySuffix(a)).toBe("1 call · 1 auto-compact · 1 error · 1 skill");
+  });
+
+  test("formatActivityBrief matches the suffix", () => {
+    const a = { ...emptyActivity(), toolCalls: 2 };
+    expect(formatActivityBrief(a)).toBe(formatActivitySuffix(a));
+    expect(formatActivityBrief(emptyActivity())).toBe("");
+  });
+
+  test("buildSessionAnalysisRows renders sections and the subagent tree", () => {
+    const state = createActivityState();
+    state.titles["ses_root"] = "Main";
+    state.titles["ses_a"] = "T3: tightly-coupled fixtures";
+    state.titles["ses_b"] = "child-of-T3";
+    recordChild(state, "ses_a", "ses_root");
+    recordChild(state, "ses_b", "ses_a");
+    recordToolPart(state, "ses_root", { id: "p1", tool: "bash" });
+    recordToolPart(state, "ses_a", { id: "p2", tool: "read" });
+    recordCompaction(state, "ses_a", "c1", true);
+    recordStep(state, "ses_a", "s1");
+
+    expect(buildSessionAnalysisRows(state, "ses_root")).toEqual([
+      "▾ Tools (2)",
+      "  bash 1",
+      "  read 1",
+      "▾ Auto-compactions",
+      "  1",
+      "▾ Model calls (steps)",
+      "  1",
+      "▾ Subagents",
+      "  · T3: tightly-coupled fixtures  1 call · 1 auto-compact",
+      "    · child-of-T3"
+    ]);
+  });
+
+  test("buildSessionAnalysisRows omits zero sections and errors section", () => {
+    const state = createActivityState();
+    state.titles["ses_root"] = "Main";
+    recordToolPart(state, "ses_root", { id: "p1", tool: "bash", state: { status: "error", input: {} } });
+    expect(buildSessionAnalysisRows(state, "ses_root")).toEqual([
+      "▾ Tools (1)",
+      "  bash 1",
+      "▾ Tool errors",
+      "  1"
+    ]);
   });
 });

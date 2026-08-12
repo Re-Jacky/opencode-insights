@@ -161,3 +161,86 @@ export function treeActivity(state: ActivityState, rootSessionID: string): Sessi
 export function treeLoading(state: ActivityState, rootSessionID: string): boolean {
   return collectTreeSessions(state, rootSessionID).some((sessionID) => state.loading.has(sessionID));
 }
+
+function pluralize(count: number, singular: string, plural?: string): string {
+  return `${count} ${count === 1 ? singular : (plural ?? `${singular}s`)}`;
+}
+
+export function formatActivitySuffix(a: SessionActivity | undefined): string {
+  if (!hasActivity(a)) return "";
+  const parts: string[] = [];
+  if (a && a.toolCalls > 0) parts.push(pluralize(a.toolCalls, "call"));
+  if (a && a.autoCompacts > 0) parts.push(pluralize(a.autoCompacts, "auto-compact"));
+  if (a && a.errors > 0) parts.push(pluralize(a.errors, "error"));
+  if (a && Object.keys(a.skills).length > 0) {
+    const total = Object.values(a.skills).reduce((sum, count) => sum + count, 0);
+    parts.push(pluralize(total, "skill"));
+  }
+  return parts.join(" · ");
+}
+
+export function formatActivityBrief(a: SessionActivity | undefined): string {
+  return formatActivitySuffix(a);
+}
+
+function truncateMiddle(value: string, maxLength: number): string {
+  if (value.length <= maxLength) return value;
+  if (maxLength <= 3) return value.slice(0, maxLength);
+  const marker = "...";
+  const left = Math.ceil((maxLength - marker.length) / 2);
+  const right = Math.floor((maxLength - marker.length) / 2);
+  return `${value.slice(0, left)}${marker}${value.slice(value.length - right)}`;
+}
+
+function sortedBreakdown(breakdown: Record<string, number>): Array<[string, number]> {
+  return Object.entries(breakdown).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+}
+
+function indent(lines: string[], depth: number): string[] {
+  return lines.map((text) => `${"  ".repeat(depth)}${text}`);
+}
+
+export function buildSessionAnalysisRows(state: ActivityState, rootSessionID: string): string[] {
+  const rows: string[] = [];
+  const children = (sessionID: string) => state.childrenByParent[sessionID] ?? [];
+  const activityOf = (sessionID: string) => state.bySessionID[sessionID] ?? emptyActivity();
+  const titleOf = (sessionID: string) => state.titles[sessionID] ?? sessionID;
+  const childIds: string[] = [];
+
+  const visit = (sessionID: string, depth: number) => {
+    for (const childID of children(sessionID)) {
+      childIds.push(childID);
+      const childActivity = activityOf(childID);
+      const suffix = formatActivitySuffix(childActivity);
+      const line = `· ${truncateMiddle(titleOf(childID), 36)}${suffix ? `  ${suffix}` : ""}`;
+      rows.push(`${"  ".repeat(depth + 1)}${line}`);
+      visit(childID, depth + 1);
+    }
+  };
+  visit(rootSessionID, 0);
+
+  const tree = treeActivity(state, rootSessionID);
+
+  const sections: Array<[string, string[]]> = [];
+  if (tree.toolCalls > 0) {
+    sections.push([`▾ Tools (${tree.toolCalls})`, indent(sortedBreakdown(tree.toolBreakdown).map(([tool, count]) => `${tool} ${count}`), 1)]);
+  }
+  if (Object.keys(tree.skills).length > 0) {
+    const total = Object.values(tree.skills).reduce((sum, count) => sum + count, 0);
+    sections.push([`▾ Skills (${total})`, indent(sortedBreakdown(tree.skills).map(([name, count]) => `${name} ${count}`), 1)]);
+  }
+  if (tree.autoCompacts > 0) {
+    sections.push([`▾ Auto-compactions`, [`  ${tree.autoCompacts}`]]);
+  }
+  if (tree.errors > 0) {
+    sections.push([`▾ Tool errors`, [`  ${tree.errors}`]]);
+  }
+  if (tree.steps > 0) {
+    sections.push([`▾ Model calls (steps)`, [`  ${tree.steps}`]]);
+  }
+  if (childIds.length > 0 && hasActivity(tree)) {
+    sections.push([`▾ Subagents`, rows]);
+  }
+
+  return sections.flatMap(([title, body]) => [title, ...body]);
+}
