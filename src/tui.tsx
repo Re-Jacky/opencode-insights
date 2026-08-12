@@ -1,7 +1,7 @@
 /** @jsxImportSource @opentui/solid */
 import { createTextAttributes, StyledText, type MouseEvent, type TextChunk, type TextRenderable } from "@opentui/core";
 import type { TuiPlugin, TuiPluginApi, TuiPluginModule } from "@opencode-ai/plugin/tui";
-import { createSignal, onCleanup } from "solid-js";
+import { createSignal, For, onCleanup } from "solid-js";
 import { readInsightsConfig, type InsightsConfig } from "./capture.js";
 import { createListenerRegistry, type Listener } from "./listeners.js";
 import { hasRenderStateChanged } from "./render-state.js";
@@ -30,6 +30,20 @@ import {
   getSubagentSidebarModel,
   type SubagentState
 } from "./subagents.js";
+import {
+  buildSessionAnalysisRows,
+  createActivityState,
+  formatActivityBrief,
+  recordChild,
+  recordCompaction,
+  recordStep,
+  recordToolPart,
+  treeActivity,
+  treeLoading,
+  type ActivityState
+} from "./activity.js";
+import { hydrateActivity, type ActivityClient } from "./activity-hydrate.js";
+import { useTerminalDimensions } from "@opentui/solid";
 
 function isSessionID(value: string | undefined): value is string {
   return typeof value === "string" && value.startsWith("ses");
@@ -337,6 +351,119 @@ function renderSubagentStyledSidebar(
   return new StyledText(chunks);
 }
 
+function renderSessionAnalysisSidebar(
+  line: string,
+  api: TuiPluginApi,
+  titleAttributes: number,
+  collapsed: boolean
+) {
+  const chunks: TextChunk[] = [
+    textChunk(`${collapsed ? "▶" : "▼"} Session Analysis\n`, api.theme.current.text, titleAttributes),
+    textChunk(line, api.theme.current.textMuted)
+  ];
+  return new StyledText(chunks);
+}
+
+function SessionAnalysisDialog(props: {
+  api: TuiPluginApi;
+  state: ActivityState;
+  rootSessionID: string;
+}) {
+  const dimensions = useTerminalDimensions();
+  const titleAttributes = createTextAttributes({ bold: true });
+  const rows = buildSessionAnalysisRows(props.state, props.rootSessionID);
+  const maxHeight = Math.max(4, Math.floor(dimensions().height / 2) - 6);
+  const { Dialog } = props.api.ui;
+  return (
+    <Dialog size="large" onClose={() => props.api.ui.dialog.clear()}>
+      <box flexDirection="column" flexGrow={1} paddingLeft={4} paddingRight={4} paddingTop={1}>
+        <text fg={props.api.theme.current.text} attributes={titleAttributes}>
+          {"Session Analysis"}
+        </text>
+        <scrollbox
+          verticalScrollbarOptions={{ visible: true }}
+          maxHeight={maxHeight}
+          flexGrow={1}
+          paddingTop={1}
+        >
+          <For each={rows}>
+            {(row) => <text fg={props.api.theme.current.textMuted}>{row}</text>}
+          </For>
+        </scrollbox>
+      </box>
+    </Dialog>
+  );
+}
+
+function SessionAnalysisSidebar(props: {
+  api: TuiPluginApi;
+  sessionID: string;
+  state: ActivityState;
+  subscribe: (listener: Listener) => () => void;
+  hydrate: () => void;
+}) {
+  let text: TextRenderable | undefined;
+  const [collapsed, setCollapsed] = createSignal(false);
+  const titleAttributes = createTextAttributes({ bold: true });
+  let previous: { content: string; visible: boolean; height: number | string } | undefined;
+
+  const toggle = (event: MouseEvent) => {
+    if (!text || event.y !== text.y) return;
+    setCollapsed((prev) => !prev);
+    sync();
+  };
+
+  const openDialog = (event: MouseEvent) => {
+    if (!text || collapsed() || event.y === text.y) return;
+    props.api.ui.dialog.replace(() => (
+      <SessionAnalysisDialog api={props.api} state={props.state} rootSessionID={props.sessionID} />
+    ));
+  };
+
+  const sync = () => {
+    if (!text) return;
+    const tree = treeActivity(props.state, props.sessionID);
+    const loading = treeLoading(props.state, props.sessionID);
+    const brief = formatActivityBrief(tree);
+    const line = loading ? (brief ? `${brief} · loading…` : "loading…") : brief;
+    const visible = line.length > 0;
+    const content = `${collapsed()}|${line}`;
+    const next: { content: string; visible: boolean; height: number | "auto" } = {
+      content,
+      visible,
+      height: visible ? "auto" : 0
+    };
+    if (!hasRenderStateChanged(previous, next)) return;
+    previous = next;
+    text.visible = next.visible;
+    text.height = next.height;
+    text.content = visible ? renderSessionAnalysisSidebar(line, props.api, titleAttributes, collapsed()) : "";
+    props.api.renderer.requestRender();
+  };
+
+  const unsubscribe = props.subscribe(sync);
+  const timer = setInterval(sync, 1_000);
+  onCleanup(() => {
+    unsubscribe();
+    clearInterval(timer);
+  });
+  props.hydrate();
+
+  return (
+    <text
+      ref={(ref: TextRenderable) => {
+        text = ref;
+        sync();
+      }}
+      onMouseDown={toggle}
+      onMouseUp={openDialog}
+      fg={props.api.theme.current.textMuted}
+    >
+      {""}
+    </text>
+  );
+}
+
 function renderTokenUsageSidebar(content: string, api: TuiPluginApi, titleAttributes: number, collapsed: boolean) {
   const [title, ...details] = content.split("\n");
   const visibleDetails = collapsed ? details.slice(0, 1) : details;
@@ -363,7 +490,9 @@ function textChunk(text: string, fg?: TextChunk["fg"], attributes?: number, bg?:
 const tui: TuiPlugin = async (api, options) => {
   const config = await readInsightsConfig(options ?? {});
   const metrics = createMetricsState();
-  const subagents = createSubagentState();
+  const activity = createActivityState();
+  const activityListeners = createListenerRegistry();
+  const subagents = createSubagentState(activity);
   const metricListeners = createListenerRegistry();
   const subagentListeners = createListenerRegistry();
   const goUsageListeners = createListenerRegistry();
@@ -455,21 +584,39 @@ const tui: TuiPlugin = async (api, options) => {
 
   const offPart = api.event.on("message.part.updated", (evt) => {
     const part = evt.properties.part;
+    const sessionID = part.sessionID ?? evt.properties.sessionID;
     if (part.type === "tool") {
-      recordToolActivity(metrics, part.sessionID ?? evt.properties.sessionID, part.messageID, Date.now());
+      recordToolActivity(metrics, sessionID, part.messageID, Date.now());
+      recordToolPart(activity, sessionID, part);
+    } else if (part.type === "compaction") {
+      recordCompaction(activity, sessionID, part.id, part.auto === true);
+    } else if (part.type === "step-finish") {
+      recordStep(activity, sessionID, part.id);
     }
     if (applySubagentEvent(subagents, evt)) subagentListeners.notify();
     metricListeners.notify();
+    activityListeners.notify();
   });
 
   const offSessionCreated = api.event.on("session.created", (evt) => {
     if (applySubagentEvent(subagents, evt)) subagentListeners.notify();
+    const info = evt.properties.info as { id?: unknown; parentID?: unknown; title?: unknown } | undefined;
+    if (info && typeof info.id === "string") {
+      if (typeof info.title === "string") activity.titles[info.id] = info.title;
+      if (typeof info.parentID === "string") recordChild(activity, info.id, info.parentID);
+      activityListeners.notify();
+    }
   });
 
   const offSessionUpdated = api.event.on("session.updated", (evt) => {
     if (applySubagentEvent(subagents, evt)) subagentListeners.notify();
-    const info = evt.properties.info as { id?: unknown; model?: { providerID?: unknown } } | undefined;
+    const info = evt.properties.info as { id?: unknown; parentID?: unknown; title?: unknown; model?: { providerID?: unknown } } | undefined;
     const sessionID = typeof info?.id === "string" ? info.id : undefined;
+    if (sessionID) {
+      if (typeof info?.title === "string") activity.titles[sessionID] = info.title;
+      if (typeof info?.parentID === "string") recordChild(activity, sessionID, info.parentID);
+      activityListeners.notify();
+    }
     const providerID = info?.model?.providerID;
     if (sessionID && typeof providerID === "string") {
       goProviderTracker.record(sessionID, providerID);
@@ -530,6 +677,13 @@ const tui: TuiPlugin = async (api, options) => {
             sessionID={props.session_id}
             state={subagents}
             subscribe={subagentListeners.subscribe}
+          />
+          <SessionAnalysisSidebar
+            api={api}
+            sessionID={props.session_id}
+            state={activity}
+            subscribe={activityListeners.subscribe}
+            hydrate={() => void hydrateActivity(api.client as unknown as ActivityClient, activity, props.session_id)}
           />
         </>
       )
