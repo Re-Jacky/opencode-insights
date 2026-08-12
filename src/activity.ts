@@ -114,3 +114,50 @@ export function recordStep(state: ActivityState, sessionID: string, id: string):
   activity.steps += 1;
   return true;
 }
+
+export function mergeActivity(...activities: SessionActivity[]): SessionActivity {
+  const result = emptyActivity();
+  for (const activity of activities) {
+    result.toolCalls += activity.toolCalls;
+    result.errors += activity.errors;
+    result.autoCompacts += activity.autoCompacts;
+    result.steps += activity.steps;
+    for (const [tool, count] of Object.entries(activity.toolBreakdown)) {
+      result.toolBreakdown[tool] = (result.toolBreakdown[tool] ?? 0) + count;
+    }
+    for (const [name, count] of Object.entries(activity.skills)) {
+      result.skills[name] = (result.skills[name] ?? 0) + count;
+    }
+  }
+  return result;
+}
+
+function collectTreeSessions(state: ActivityState, rootSessionID: string): string[] {
+  const visited = new Set<string>();
+  const result: string[] = [];
+  const stack = [rootSessionID];
+  while (stack.length > 0) {
+    const sessionID = stack.pop();
+    if (sessionID === undefined || visited.has(sessionID)) continue;
+    visited.add(sessionID);
+    result.push(sessionID);
+    const children = state.childrenByParent[sessionID] ?? [];
+    for (const child of children) {
+      if (!visited.has(child)) stack.push(child);
+    }
+  }
+  return result;
+}
+
+export function treeActivity(state: ActivityState, rootSessionID: string): SessionActivity {
+  const activities: SessionActivity[] = [];
+  for (const sessionID of collectTreeSessions(state, rootSessionID)) {
+    const activity = state.bySessionID[sessionID];
+    if (activity) activities.push(activity);
+  }
+  return mergeActivity(...activities);
+}
+
+export function treeLoading(state: ActivityState, rootSessionID: string): boolean {
+  return collectTreeSessions(state, rootSessionID).some((sessionID) => state.loading.has(sessionID));
+}

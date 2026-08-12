@@ -3,10 +3,13 @@ import {
   createActivityState,
   emptyActivity,
   hasActivity,
+  mergeActivity,
   recordChild,
   recordCompaction,
   recordStep,
-  recordToolPart
+  recordToolPart,
+  treeActivity,
+  treeLoading
 } from "../src/activity.js";
 
 describe("activity state", () => {
@@ -104,5 +107,71 @@ describe("activity state", () => {
     recordToolPart(state, "ses_a", { tool: "bash" });
     recordToolPart(state, "ses_a", { tool: "bash" });
     expect(state.bySessionID["ses_a"]?.toolCalls).toBe(2);
+  });
+});
+
+describe("activity merge and tree", () => {
+  test("mergeActivity sums every metric and merges breakdowns", () => {
+    const a = { ...emptyActivity(), toolCalls: 3, errors: 1, autoCompacts: 2, steps: 5, toolBreakdown: { bash: 2, read: 1 }, skills: { brainstorming: 1 } };
+    const b = { ...emptyActivity(), toolCalls: 4, errors: 0, autoCompacts: 1, steps: 0, toolBreakdown: { bash: 3, write: 1 }, skills: { brainstorming: 2, tdd: 1 } };
+    const merged = mergeActivity(a, b);
+    expect(merged.toolCalls).toBe(7);
+    expect(merged.errors).toBe(1);
+    expect(merged.autoCompacts).toBe(3);
+    expect(merged.steps).toBe(5);
+    expect(merged.toolBreakdown).toEqual({ bash: 5, read: 1, write: 1 });
+    expect(merged.skills).toEqual({ brainstorming: 3, tdd: 1 });
+  });
+
+  test("mergeActivity with no args is empty", () => {
+    expect(hasActivity(mergeActivity())).toBe(false);
+  });
+
+  test("treeActivity aggregates root and descendants recursively", () => {
+    const state = createActivityState();
+    recordChild(state, "ses_a", "ses_root");
+    recordChild(state, "ses_b", "ses_a");
+    recordToolPart(state, "ses_root", { id: "p1", tool: "bash" });
+    recordToolPart(state, "ses_a", { id: "p2", tool: "read" });
+    recordStep(state, "ses_a", "s1");
+    recordToolPart(state, "ses_b", { id: "p3", tool: "write" });
+    recordCompaction(state, "ses_b", "c1", true);
+
+    const tree = treeActivity(state, "ses_root");
+    expect(tree.toolCalls).toBe(3);
+    expect(tree.toolBreakdown).toEqual({ bash: 1, read: 1, write: 1 });
+    expect(tree.steps).toBe(1);
+    expect(tree.autoCompacts).toBe(1);
+  });
+
+  test("treeActivity guards against cycles", () => {
+    const state = createActivityState();
+    recordChild(state, "ses_a", "ses_root");
+    recordChild(state, "ses_root", "ses_a");
+    recordToolPart(state, "ses_root", { id: "p1", tool: "bash" });
+    expect(treeActivity(state, "ses_root").toolCalls).toBe(1);
+  });
+
+  test("treeActivity ignores missing sessions", () => {
+    const state = createActivityState();
+    recordChild(state, "ses_missing", "ses_root");
+    recordToolPart(state, "ses_root", { id: "p1", tool: "bash" });
+    expect(treeActivity(state, "ses_root").toolCalls).toBe(1);
+  });
+
+  test("treeActivity includes children added live after seeding", () => {
+    const state = createActivityState();
+    recordChild(state, "ses_live_child", "ses_root");
+    recordToolPart(state, "ses_live_child", { id: "p1", tool: "grep" });
+    expect(treeActivity(state, "ses_root").toolCalls).toBe(1);
+  });
+
+  test("treeLoading reports true when any tree session is loading", () => {
+    const state = createActivityState();
+    recordChild(state, "ses_a", "ses_root");
+    state.loading.add("ses_a");
+    expect(treeLoading(state, "ses_root")).toBe(true);
+    state.loading.delete("ses_a");
+    expect(treeLoading(state, "ses_root")).toBe(false);
   });
 });
