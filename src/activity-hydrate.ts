@@ -10,13 +10,6 @@ export type ActivityClient = {
 const CONCURRENCY_LIMIT = 4;
 const LIST_LIMIT = 1000;
 
-function compactUndefined<T extends Record<string, unknown>>(value: T): T {
-  for (const key of Object.keys(value)) {
-    if (value[key] === undefined) delete value[key];
-  }
-  return value;
-}
-
 function isSessionID(value: string): boolean {
   return value.startsWith("ses");
 }
@@ -58,13 +51,13 @@ function applyParts(state: ActivityState, sessionID: string, parts: Array<Record
     const id = typeof part.id === "string" ? part.id : undefined;
     const type = part.type;
     if (type === "tool" && typeof part.tool === "string") {
-      recordToolPart(state, sessionID, compactUndefined({
+      recordToolPart(state, sessionID, {
         ...(id !== undefined ? { id } : {}),
         tool: part.tool,
         ...(typeof part.state === "object" && part.state !== null && !Array.isArray(part.state)
           ? { state: part.state as { status?: string; input?: { name?: string } } }
           : {})
-      }));
+      });
     } else if (type === "compaction" && id !== undefined) {
       recordCompaction(state, sessionID, id, part.auto === true);
     } else if (type === "step-finish" && id !== undefined) {

@@ -372,14 +372,18 @@ function SessionAnalysisDialog(props: {
   const dimensions = useTerminalDimensions();
   const titleAttributes = createTextAttributes({ bold: true });
   const rows = buildSessionAnalysisRows(props.state, props.rootSessionID);
+  const loading = treeLoading(props.state, props.rootSessionID);
   const maxHeight = Math.max(4, Math.floor(dimensions().height / 2) - 6);
   const { Dialog } = props.api.ui;
   return (
     <Dialog size="large" onClose={() => props.api.ui.dialog.clear()}>
       <box flexDirection="column" flexGrow={1} paddingLeft={4} paddingRight={4} paddingTop={1}>
-        <text fg={props.api.theme.current.text} attributes={titleAttributes}>
-          {"Session Analysis"}
-        </text>
+        <box flexDirection="row">
+          <text fg={props.api.theme.current.text} attributes={titleAttributes}>
+            {"Session Analysis"}
+          </text>
+          <text fg={props.api.theme.current.textMuted}>  [esc]</text>
+        </box>
         <scrollbox
           verticalScrollbarOptions={{ visible: true }}
           maxHeight={maxHeight}
@@ -388,6 +392,9 @@ function SessionAnalysisDialog(props: {
         >
           <For each={rows}>
             {(row) => <text fg={props.api.theme.current.textMuted}>{row}</text>}
+          </For>
+          <For each={loading ? [true] : []}>
+            {() => <text fg={props.api.theme.current.textMuted}>loading…</text>}
           </For>
         </scrollbox>
       </box>
@@ -683,7 +690,7 @@ const tui: TuiPlugin = async (api, options) => {
             sessionID={props.session_id}
             state={activity}
             subscribe={activityListeners.subscribe}
-            hydrate={() => void hydrateActivity(api.client as unknown as ActivityClient, activity, props.session_id)}
+            hydrate={() => void hydrateActivity(api.client as unknown as ActivityClient, activity, props.session_id).then(() => activityListeners.notify())}
           />
         </>
       )
