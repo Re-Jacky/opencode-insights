@@ -98,8 +98,9 @@ export type SessionActivity = {
 export type ActivityState = {
   bySessionID: Record<string, SessionActivity>;
   childrenByParent: Record<string, string[]>; // subagent tree, seeded by backfill, updated live
+  titles: Record<string, string>;           // session id → title (backfill + live session.updated)
   hydrated: Set<string>;                    // sessions whose history has been backfilled
-  seenPartIDs: Record<string, Set<string>>; // per-session dedup of part ids seen (live or backfilled)
+  seenKeys: Record<string, Set<string>>;    // per-session per-metric dedup keys ("tool:prt_x", "error:prt_x", ...)
   loading: Set<string>;                     // session ids whose backfill is currently in flight
 };
 
@@ -131,18 +132,27 @@ export function formatSkillCount(skills: Record<string, number>): string; // "3 
 `tool === "skill"` and `input.name` is a non-empty string), and
 `errors` when `state.status === "error"`.
 
-**Dedup is per-metric, not per-part.** A tool part arrives through
-`message.part.updated` multiple times as it transitions
-`pending → running → completed/error` with the same `prt_` id. The count
-(`toolCalls`) must increment only once per part id, but the error flag and
-skill name must be *updated on every sighting* — otherwise a failed tool
-is recorded as pending and the error count stays 0. Implemented as:
+**Dedup is per-metric, keyed by `metric:partId`.** A tool part arrives
+through `message.part.updated` multiple times as it transitions
+`pending → running → completed/error` with the same `prt_` id. Each
+metric counts once per part id — but the *key* differs per metric so
+counts can't double across live and backfill:
 
-- `recordToolPart` increments `toolCalls`/`toolBreakdown` only when the id
-  is not yet in `seenPartIDs[session]` (then adds it), but always updates
-  `errors` and `skills` from the latest sighting's state.
-- `recordCompaction` / `recordStep` likewise dedup on their part id and
-  only ever count once.
+- `tool:${id}` — increments `toolCalls` / `toolBreakdown` when first seen.
+- `error:${id}` — increments `errors` only when a sighting has
+  `state.status === "error"` (the error arrives on the *last* sighting,
+  after the tool key was already recorded; a plain part-id dedup would
+  miss it).
+- `skill:${id}` — increments `skills[name]` only when `tool === "skill"`
+  and `state.input.name` is present (the name may not exist on the
+  `pending` sighting, only on `running`/`completed`).
+- `compact:${id}` / `step:${id}` — increment `autoCompacts` / `steps`
+  once per id.
+
+The same keyed dedup runs on both the live and backfill paths, so
+`recordToolPart` / `recordCompaction` / `recordStep` each take the part id,
+derive the metric key, and short-circuit when it is already in
+`seenKeys[session]`, adding it otherwise.
 
 `recordChild(state, sessionID, parentID)` appends `sessionID` to
 `childrenByParent[parentID]` if not already present. It is called from the
@@ -195,8 +205,8 @@ opencode version (verified against the captured event stream).
    ID so re-entering a session is instant.
 
 **Merge semantics:** live parts and backfilled parts both feed the same
-per-session record through the single per-metric dedup in
-`seenPartIDs`; backfill merges only parts not yet seen. Since all three
+per-session record through the single keyed dedup in
+`seenKeys`; backfill merges only parts not yet seen. Since all three
 part types carry the same `prt_` id in both live events and backfilled
 history, one dedup point covers both paths.
 
@@ -297,7 +307,8 @@ scrollbar) containing:
 - Rows are computed fresh from current state at open time. The dialog is
   a **snapshot**: it does not live-update while open; closing and
   reopening re-renders from the current state.
-- **Memory:** `bySessionID` / `childrenByParent` / `seenPartIDs` grow for
+- **Memory:** `bySessionID` / `childrenByParent` / `titles` /
+  `seenKeys` grow for
   the lifetime of the TUI process (they are never pruned). Accepted
   tradeoff — the TUI plugin already keeps unbounded per-session metric
   state, and this adds a bounded record per observed session; no pruning
@@ -310,7 +321,7 @@ scrollbar) containing:
 - Extend the `message.part.updated` handler to feed tool/compaction/
   step-finish parts into `activity` (and call `recordChild` in the
   `session.created` / `session.updated` handler when `info.parentID` is
-  set), then notify listeners.
+  set, storing `info.title` into `titles`), then notify listeners.
 - Add a `hydrateActivity(api, activity, sessionID)` sibling of
   `hydrateSessionMetrics`, invoked from a `hydrate` prop on the
   `SessionAnalysisSidebar` (the sidebar content remounts on session
@@ -345,8 +356,8 @@ scrollbar) containing:
 ## Testing
 
 - `test/activity.test.ts` — pure unit tests: `recordChild` (index append,
-  no duplicates), `recordToolPart` (counting, per-metric dedup across
-  pending→error transitions, skill extraction, error detection),
+  no duplicates), `recordToolPart` (counting, per-metric keyed dedup
+  across pending→error transitions, skill extraction, error detection),
   `recordCompaction`, `recordStep`, `mergeActivity`,
   `treeActivity` (recursive aggregation, cycle guard, missing sessions,
   freshness from live-added children), `formatActivitySuffix` /
@@ -358,7 +369,7 @@ scrollbar) containing:
   unchanged, and the dialog uses `api.ui.dialog.replace`.
 - Backfill sequencing gets a mocked-client test: `session.list()` →
   `childrenByParent` → per-child `session.messages()` (concurrent, capped)
-  → merged counts with part-id dedup; failure deletes from `hydrated` so
+  → merged counts with keyed dedup; failure deletes from `hydrated` so
   the next navigation retries.
 - TDD: write failing tests for `activity.ts` helpers first, then
   implement; the tui wiring is verified by the entrypoint text assertions
