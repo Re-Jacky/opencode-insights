@@ -1,7 +1,7 @@
 /** @jsxImportSource @opentui/solid */
 import { createTextAttributes, StyledText, type MouseEvent, type TextChunk, type TextRenderable } from "@opentui/core";
 import type { TuiPlugin, TuiPluginApi, TuiPluginModule } from "@opencode-ai/plugin/tui";
-import { createSignal, For, onCleanup } from "solid-js";
+import { createSignal, For, onCleanup, onMount } from "solid-js";
 import { readInsightsConfig, type InsightsConfig } from "./capture.js";
 import { createListenerRegistry, type Listener } from "./listeners.js";
 import { hasRenderStateChanged } from "./render-state.js";
@@ -34,12 +34,14 @@ import {
   buildSessionAnalysisRows,
   createActivityState,
   formatActivityBrief,
+  formatSubagentCount,
   recordChild,
   recordCompaction,
   recordStep,
   recordToolPart,
   treeActivity,
   treeLoading,
+  treeSubagentCount,
   type ActivityState
 } from "./activity.js";
 import { hydrateActivity, type ActivityClient } from "./activity-hydrate.js";
@@ -351,14 +353,9 @@ function renderSubagentStyledSidebar(
   return new StyledText(chunks);
 }
 
-function renderSessionAnalysisSidebar(
-  line: string,
-  api: TuiPluginApi,
-  titleAttributes: number,
-  collapsed: boolean
-) {
+function renderSessionAnalysisSidebar(line: string, api: TuiPluginApi, titleAttributes: number) {
   const chunks: TextChunk[] = [
-    textChunk(`${collapsed ? "▶" : "▼"} Session Analysis\n`, api.theme.current.text, titleAttributes),
+    textChunk(`Session Analysis\n`, api.theme.current.text, titleAttributes),
     textChunk(line, api.theme.current.textMuted)
   ];
   return new StyledText(chunks);
@@ -374,31 +371,38 @@ function SessionAnalysisDialog(props: {
   const rows = buildSessionAnalysisRows(props.state, props.rootSessionID);
   const loading = treeLoading(props.state, props.rootSessionID);
   const maxHeight = Math.max(4, Math.floor(dimensions().height / 2) - 6);
-  const { Dialog } = props.api.ui;
+  onMount(() => props.api.ui.dialog.setSize("large"));
   return (
-    <Dialog size="large" onClose={() => props.api.ui.dialog.clear()}>
-      <box flexDirection="column" flexGrow={1} paddingLeft={4} paddingRight={4} paddingTop={1}>
-        <box flexDirection="row">
-          <text fg={props.api.theme.current.text} attributes={titleAttributes}>
-            {"Session Analysis"}
-          </text>
-          <text fg={props.api.theme.current.textMuted}>  [esc]</text>
-        </box>
-        <scrollbox
-          verticalScrollbarOptions={{ visible: true }}
-          maxHeight={maxHeight}
-          flexGrow={1}
-          paddingTop={1}
-        >
-          <For each={rows}>
-            {(row) => <text fg={props.api.theme.current.textMuted}>{row}</text>}
-          </For>
-          <For each={loading ? [true] : []}>
-            {() => <text fg={props.api.theme.current.textMuted}>loading…</text>}
-          </For>
-        </scrollbox>
+    <box flexDirection="column" flexGrow={1} paddingLeft={4} paddingRight={4} paddingTop={1}>
+      <box flexDirection="row" justifyContent="space-between">
+        <text fg={props.api.theme.current.text} attributes={titleAttributes}>
+          {"Session Analysis"}
+        </text>
+        <text fg={props.api.theme.current.textMuted} onMouseUp={() => props.api.ui.dialog.clear()}>
+          esc
+        </text>
       </box>
-    </Dialog>
+      <scrollbox
+        verticalScrollbarOptions={{ visible: true }}
+        maxHeight={maxHeight}
+        flexGrow={1}
+        paddingTop={1}
+      >
+        <For each={rows}>
+          {(row) => (
+            <text
+              fg={row.header ? props.api.theme.current.text : props.api.theme.current.textMuted}
+              {...(row.header ? { attributes: titleAttributes } : {})}
+            >
+              {row.text}
+            </text>
+          )}
+        </For>
+        <For each={loading ? [true] : []}>
+          {() => <text fg={props.api.theme.current.textMuted}>loading…</text>}
+        </For>
+      </scrollbox>
+    </box>
   );
 }
 
@@ -410,18 +414,11 @@ function SessionAnalysisSidebar(props: {
   hydrate: () => void;
 }) {
   let text: TextRenderable | undefined;
-  const [collapsed, setCollapsed] = createSignal(false);
   const titleAttributes = createTextAttributes({ bold: true });
   let previous: { content: string; visible: boolean; height: number | string } | undefined;
 
-  const toggle = (event: MouseEvent) => {
-    if (!text || event.y !== text.y) return;
-    setCollapsed((prev) => !prev);
-    sync();
-  };
-
   const openDialog = (event: MouseEvent) => {
-    if (!text || collapsed() || event.y === text.y) return;
+    if (!text) return;
     props.api.ui.dialog.replace(() => (
       <SessionAnalysisDialog api={props.api} state={props.state} rootSessionID={props.sessionID} />
     ));
@@ -431,12 +428,13 @@ function SessionAnalysisSidebar(props: {
     if (!text) return;
     const tree = treeActivity(props.state, props.sessionID);
     const loading = treeLoading(props.state, props.sessionID);
-    const brief = formatActivityBrief(tree);
+    const brief = [formatActivityBrief(tree), formatSubagentCount(treeSubagentCount(props.state, props.sessionID))]
+      .filter(Boolean)
+      .join(" · ");
     const line = loading ? (brief ? `${brief} · loading…` : "loading…") : brief;
     const visible = line.length > 0;
-    const content = `${collapsed()}|${line}`;
     const next: { content: string; visible: boolean; height: number | "auto" } = {
-      content,
+      content: line,
       visible,
       height: visible ? "auto" : 0
     };
@@ -444,7 +442,7 @@ function SessionAnalysisSidebar(props: {
     previous = next;
     text.visible = next.visible;
     text.height = next.height;
-    text.content = visible ? renderSessionAnalysisSidebar(line, props.api, titleAttributes, collapsed()) : "";
+    text.content = visible ? renderSessionAnalysisSidebar(line, props.api, titleAttributes) : "";
     props.api.renderer.requestRender();
   };
 
@@ -462,7 +460,6 @@ function SessionAnalysisSidebar(props: {
         text = ref;
         sync();
       }}
-      onMouseDown={toggle}
       onMouseUp={openDialog}
       fg={props.api.theme.current.textMuted}
     >

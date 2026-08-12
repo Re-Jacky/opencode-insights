@@ -5,6 +5,7 @@ import {
   emptyActivity,
   formatActivityBrief,
   formatActivitySuffix,
+  formatSubagentCount,
   hasActivity,
   mergeActivity,
   recordChild,
@@ -12,7 +13,8 @@ import {
   recordStep,
   recordToolPart,
   treeActivity,
-  treeLoading
+  treeLoading,
+  treeSubagentCount
 } from "../src/activity.js";
 
 describe("activity state", () => {
@@ -212,16 +214,16 @@ describe("activity formatting", () => {
     recordStep(state, "ses_a", "s1");
 
     expect(buildSessionAnalysisRows(state, "ses_root")).toEqual([
-      "▾ Tools (2)",
-      "  bash 1",
-      "  read 1",
-      "▾ Auto-compactions",
-      "  1",
-      "▾ Model calls (steps)",
-      "  1",
-      "▾ Subagents",
-      "  · T3: tightly-coupled fixtures  1 call · 1 auto-compact",
-      "    · child-of-T3"
+      { text: "▾ Tools (2)", header: true },
+      { text: "  bash 1", header: false },
+      { text: "  read 1", header: false },
+      { text: "▾ Auto-compactions", header: true },
+      { text: "  1", header: false },
+      { text: "▾ Model calls (steps)", header: true },
+      { text: "  1", header: false },
+      { text: "▾ Subagents", header: true },
+      { text: "  · T3: tightly-coupled fixtures  1 call · 1 auto-compact", header: false },
+      { text: "    · child-of-T3", header: false }
     ]);
   });
 
@@ -230,10 +232,22 @@ describe("activity formatting", () => {
     state.titles["ses_root"] = "Main";
     recordToolPart(state, "ses_root", { id: "p1", tool: "bash", state: { status: "error", input: {} } });
     expect(buildSessionAnalysisRows(state, "ses_root")).toEqual([
-      "▾ Tools (1)",
-      "  bash 1",
-      "▾ Tool errors",
-      "  1"
+      { text: "▾ Tools (1)", header: true },
+      { text: "  bash 1", header: false },
+      { text: "▾ Tool errors", header: true },
+      { text: "  1", header: false }
     ]);
+  });
+
+  test("treeSubagentCount counts descendants and formatSubagentCount pluralizes", () => {
+    const state = createActivityState();
+    expect(treeSubagentCount(state, "ses_root")).toBe(0);
+    recordChild(state, "ses_a", "ses_root");
+    recordChild(state, "ses_b", "ses_a");
+    expect(treeSubagentCount(state, "ses_root")).toBe(2);
+    expect(treeSubagentCount(state, "ses_a")).toBe(1);
+    expect(formatSubagentCount(0)).toBe("");
+    expect(formatSubagentCount(1)).toBe("1 subagent");
+    expect(formatSubagentCount(2)).toBe("2 subagents");
   });
 });

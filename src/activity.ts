@@ -200,7 +200,21 @@ function indent(lines: string[], depth: number): string[] {
   return lines.map((text) => `${"  ".repeat(depth)}${text}`);
 }
 
-export function buildSessionAnalysisRows(state: ActivityState, rootSessionID: string): string[] {
+export type SessionAnalysisRow = {
+  text: string;
+  header: boolean;
+};
+
+export function treeSubagentCount(state: ActivityState, rootSessionID: string): number {
+  return Math.max(0, collectTreeSessions(state, rootSessionID).length - 1);
+}
+
+export function formatSubagentCount(count: number): string {
+  if (count <= 0) return "";
+  return pluralize(count, "subagent");
+}
+
+export function buildSessionAnalysisRows(state: ActivityState, rootSessionID: string): SessionAnalysisRow[] {
   const rows: string[] = [];
   const children = (sessionID: string) => state.childrenByParent[sessionID] ?? [];
   const activityOf = (sessionID: string) => state.bySessionID[sessionID] ?? emptyActivity();
@@ -242,5 +256,8 @@ export function buildSessionAnalysisRows(state: ActivityState, rootSessionID: st
     sections.push([`▾ Subagents`, rows]);
   }
 
-  return sections.flatMap(([title, body]) => [title, ...body]);
+  return sections.flatMap(([title, body]) => [
+    { text: title, header: true },
+    ...body.map((text) => ({ text, header: false }))
+  ]);
 }
