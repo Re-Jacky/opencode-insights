@@ -340,7 +340,6 @@ export async function configureOpenCodeDebug(options: CliOptions) {
   const tuiConfig = await readJsonConfig(tuiPath, { plugin: [] }, tuiSource);
   setSinglePluginSpec(opencodeConfig, localServerEntry);
   setSinglePluginSpec(tuiConfig, localTuiEntry);
-  removePlugin(tuiConfig, SUBPATH_TUI_PLUGIN_SPEC);
 
   const lines = [
     `OpenCode config: ${opencodePath}`,
@@ -371,18 +370,24 @@ export async function revertOpenCodeDebug(options: CliOptions) {
   const tuiPath = join(configDir, "tui.json");
   const officialSpec = `${SERVER_PLUGIN_SPEC}@latest`;
 
+  const serverResult = await revertPluginToOfficial(opencodePath, officialSpec, options);
+  const tuiResult = await revertPluginToOfficial(tuiPath, officialSpec, options);
+  const changed = serverResult.startsWith("replaced") || tuiResult.startsWith("replaced");
+
   const lines = [
     `OpenCode config: ${opencodePath}`,
     `TUI config: ${tuiPath}`,
     `Official plugin spec: ${officialSpec}`,
-    `Server plugin: ${await revertPluginToOfficial(opencodePath, officialSpec, options)}`,
-    `TUI plugin: ${await revertPluginToOfficial(tuiPath, officialSpec, options)}`
+    `Server plugin: ${serverResult}`,
+    `TUI plugin: ${tuiResult}`
   ];
 
   if (options.dryRun) {
     lines.push("Dry run: no files written.");
-  } else {
+  } else if (changed) {
     lines.push("Reverted to the official package. Restart OpenCode to load it.");
+  } else {
+    lines.push("No local build output found; nothing to revert.");
   }
   return lines.join("\n");
 }
@@ -407,7 +412,7 @@ async function revertPluginToOfficial(path: string, officialSpec: string, option
 
 function isLocalDistEntry(entry: unknown): boolean {
   const spec = Array.isArray(entry) ? entry[0] : entry;
-  return typeof spec === "string" && /\/opencode-insights\/dist\/(?:index|tui)\.js$/u.test(spec);
+  return typeof spec === "string" && /\/opencode-insights\/dist\/(?:index|tui)\.js$/u.test(spec.replaceAll("\\", "/"));
 }
 
 function dedupeStrings(values: unknown[]) {
@@ -522,7 +527,9 @@ function isPluginEntry(entry: unknown, plugin: string) {
 
 function setSinglePluginSpec(config: JsonObject, nextPlugin: unknown) {
   const current = Array.isArray(config.plugin) ? config.plugin : [];
-  const next = current.filter((entry) => !isInsightsPluginEntry(entry) && entry !== nextPlugin);
+  const next = current.filter(
+    (entry) => !isInsightsPluginEntry(entry) && entry !== nextPlugin && !(Array.isArray(entry) && entry[0] === nextPlugin)
+  );
   config.plugin = [...next, nextPlugin];
 }
 
@@ -536,7 +543,8 @@ function isInsightsSpec(spec: string): boolean {
   if (spec === SERVER_PLUGIN_SPEC || spec === SUBPATH_TUI_PLUGIN_SPEC) return true;
   if (spec.startsWith("npm:")) return isInsightsSpec(spec.slice(4));
   if (spec.startsWith(`${SERVER_PLUGIN_SPEC}@`)) return true;
-  return /(?:^|[/@-])opencode-insights.*\.tgz$/u.test(spec) || /\/opencode-insights\/dist\/(?:index|tui)\.js$/u.test(spec);
+  const normalized = spec.replaceAll("\\", "/");
+  return /(?:^|[/@-])opencode-insights.*\.tgz$/u.test(normalized) || /\/opencode-insights\/dist\/(?:index|tui)\.js$/u.test(normalized);
 }
 
 export async function uninstallOpenCode(options: CliOptions) {
