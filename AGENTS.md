@@ -8,7 +8,7 @@ OpenCode plugin `@rejacky/opencode-insights` — local, unredacted capture of Op
 - `npm run typecheck` — `tsc --noEmit` (strict + `noUncheckedIndexedAccess` + `exactOptionalPropertyTypes`).
 - `npm test` — `vitest run` (tests live in `test/**/*.test.ts`, `restoreMocks: true`).
 - `npm run build` — tsup, ESM-only, three entries (`index`, `tui`, `cli`). `@opencode-ai/plugin`, `@opentui/*`, `solid-js` are externalized.
-- `npm run debug` — builds then runs `node dist/cli.js debug`; requires a build first.
+- `npm run debug` — builds then runs `node dist/cli.js debug` to point the OpenCode configs at the local build; `npm run revert-debug` runs `node dist/cli.js revert` to restore the official `@rejacky/opencode-insights@latest` package. Requires a build first.
 - No linter or formatter is configured.
 - `postinstall` runs `npm rebuild better-sqlite3` (native module). `prepack` runs the build.
 
@@ -23,9 +23,10 @@ OpenCode plugin `@rejacky/opencode-insights` — local, unredacted capture of Op
 ## Architecture
 
 - `src/index.ts` — server plugin entrypoint. Default export is `{ id, server }` only; `tui` is a separate named export that lazy-imports `./tui.js`. Do NOT put `tui` in the default export — a test enforces it. `id` is `"opencode-insights"`.
-- `src/tui.tsx` — TUI plugin with its own `id = "opencode-insights-tui"` (SolidJS + @opentui). Sidebar sections: Token Usage, Go Usage, Subagents; collapsible via section-header click.
+- `src/tui.tsx` — TUI plugin with its own `id = "opencode-insights-tui"` (SolidJS + @opentui). Sidebar sections: Token Usage, Go Usage, Subagents, Session Analysis; collapsible via section-header click.
 - `src/capture.ts` — normalizes every hook payload (`chat.*`, `event`, `tool.execute.*`) into a `CaptureRecord` and persists via `SqliteCaptureStore`. SQLite (better-sqlite3, lazily `import()`ed) with fallback to a `.jsonl` append store when unavailable. `openDatabase` tries better-sqlite3 then sql.js.
 - `src/inspect.ts` — reconstructs sessions from raw captures; `src/metrics.ts` — TPS/cache metrics and `promptRightMetrics`; `src/subagents.ts` — subagent tracking; `src/go-usage.ts` — opt-in Go usage fetch from opencode.ai (cookie + workspaceID); `src/viewer.ts` — local web viewer server; `src/cli.ts` + `src/cli-shim.ts` — CLI and the `~/.local/bin` shim.
+- `src/activity.ts` — session activity metrics (tool calls, skills, auto-compactions, steps) with per-metric keyed dedup; `src/activity-hydrate.ts` — history backfill via `session.list()`/`session.messages()`.
 - `src/listeners.ts` / `src/render-state.ts` — tiny shared helpers for listener registries and state.
 
 ## Operational rules

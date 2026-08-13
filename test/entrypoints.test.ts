@@ -43,4 +43,15 @@ describe("plugin entrypoints", () => {
     expect(source).toContain("toggleTokenUsage");
     expect(source).toContain("onMouseDown={toggleTokenUsage}");
   });
+
+  test("renders the session analysis sidebar and dialog", () => {
+    const source = readFileSync(new URL("../src/tui.tsx", import.meta.url), "utf8");
+
+    expect(source).toContain("function SessionAnalysisSidebar");
+    expect(source).toContain('"Session Analysis"');
+    expect(source).toContain("api.ui.dialog.replace");
+    expect(source).toContain("function SessionAnalysisDialog");
+    expect(source).toContain("buildSessionAnalysisRows");
+    expect(source).toContain("treeActivity");
+  });
 });
