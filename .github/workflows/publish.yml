@@ -20,7 +20,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
   id-token: write
 
 jobs:
@@ -29,6 +29,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          fetch-tags: true
 
       - name: Setup Node.js
         uses: actions/setup-node@v5
@@ -46,13 +49,22 @@ jobs:
       - name: Check whether version is already published
         id: published
         shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           package_name=$(node -p "require('./package.json').name")
           package_version=$(node -p "require('./package.json').version")
           published_version=$(npm view "${package_name}@${package_version}" version 2>/dev/null || true)
+          tag="v${package_version}"
+          if gh release view "${tag}" --json tagName >/dev/null 2>&1; then
+            release_exists=true
+          else
+            release_exists=false
+          fi
 
           echo "package_name=${package_name}" >> "$GITHUB_OUTPUT"
           echo "package_version=${package_version}" >> "$GITHUB_OUTPUT"
+          echo "release_exists=${release_exists}" >> "$GITHUB_OUTPUT"
 
           if [ "$published_version" = "$package_version" ]; then
             echo "should_publish=false" >> "$GITHUB_OUTPUT"
@@ -65,3 +77,69 @@ jobs:
       - name: Publish
         if: steps.published.outputs.should_publish == 'true'
         run: npm publish --access public --provenance
+
+      - name: Create GitHub Release
+        if: steps.published.outputs.should_publish == 'true' || steps.published.outputs.release_exists == 'false'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          package_name="${{ steps.published.outputs.package_name }}"
+          package_version="${{ steps.published.outputs.package_version }}"
+          tag="v${package_version}"
+
+          if gh release view "${tag}" --json tagName >/dev/null 2>&1; then
+            echo "Release ${tag} already exists; skipping."
+            exit 0
+          fi
+
+          previous_tag=$(git tag --sort=-v:refname --format='%(refname:short)' | grep -E '^v[0-9]' | grep -v "^${tag}$" | head -1 || true)
+          if [ -n "$previous_tag" ]; then
+            log_range="${previous_tag}..HEAD"
+          else
+            log_range="HEAD"
+          fi
+
+          strip_prefix() {
+            local s="$1"
+            case "$s" in
+              feat:*) s="${s#feat:}" ;;
+              fix:*) s="${s#fix:}" ;;
+              docs:*) s="${s#docs:}" ;;
+              test:*) s="${s#test:}" ;;
+              style:*) s="${s#style:}" ;;
+              chore:*) s="${s#chore:}" ;;
+              refactor:*) s="${s#refactor:}" ;;
+            esac
+            s="${s#"${s%%[![:space:]]*}"}"
+            printf '%s' "$s"
+          }
+
+          build_section() {
+            local name="$1"
+            local items="$2"
+            if [ -z "$items" ]; then
+              return 0
+            fi
+            printf '\n## %s\n%s' "$name" "$items"
+          }
+
+          features=""
+          fixes=""
+          other=""
+          while IFS= read -r subject; do
+            case "$subject" in
+              feat:*) features+="- $(strip_prefix "$subject")"$'\n' ;;
+              fix:*) fixes+="- $(strip_prefix "$subject")"$'\n' ;;
+              Release*) ;;
+              *) other+="- $(strip_prefix "$subject")"$'\n' ;;
+            esac
+          done < <(git log --no-merges --pretty=format:%s "$log_range")
+
+          notes="# Release v${package_version}"
+          notes+="$(build_section "New Features" "$features")"
+          notes+="$(build_section "Bug Fixes" "$fixes")"
+          notes+="$(build_section "Other" "$other")"
+          notes+=$'\n\n---\nPublished to npm: https://www.npmjs.com/package/'"${package_name}"
+
+          gh release create "${tag}" --title "${tag}" --target "${GITHUB_SHA}" --notes "${notes}"
