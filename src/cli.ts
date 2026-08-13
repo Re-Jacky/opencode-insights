@@ -462,7 +462,7 @@ function isPluginEntry(entry: unknown, plugin: string) {
 
 function setSinglePluginSpec(config: JsonObject, nextPlugin: unknown) {
   const current = Array.isArray(config.plugin) ? config.plugin : [];
-  const next = current.filter((entry) => !isInsightsPluginEntry(entry));
+  const next = current.filter((entry) => !isInsightsPluginEntry(entry) && entry !== nextPlugin);
   config.plugin = [...next, nextPlugin];
 }
 

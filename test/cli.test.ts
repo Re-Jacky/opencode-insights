@@ -294,6 +294,49 @@ describe("cli helpers", () => {
     }
   });
 
+  test("debug run twice keeps a single local build entry", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "opencode-insights-test-"));
+    const projectDir = await mkdtemp(join(tmpdir(), "opencode-insights-project-"));
+    const dataDir = await mkdtemp(join(tmpdir(), "opencode-insights-data-"));
+    const originalCwd = process.cwd();
+    try {
+      await mkdir(join(projectDir, "dist"), { recursive: true });
+      await writeFile(join(projectDir, "dist", "index.js"), "", "utf8");
+      await writeFile(join(projectDir, "dist", "tui.js"), "", "utf8");
+      await writeFile(join(dir, "opencode.jsonc"), '{\n  "plugin": []\n}\n', "utf8");
+      await writeFile(join(dir, "tui.json"), '{"plugin": []}\n', "utf8");
+
+      process.chdir(projectDir);
+      const options = {
+        configDir: dir,
+        dataDir,
+        limit: 20,
+        limitProvided: false,
+        json: false,
+        dryRun: false,
+        keepData: false
+      };
+      await configureOpenCodeDebug(options);
+      await configureOpenCodeDebug(options);
+
+      const localServerEntry = resolve("dist/index.js");
+      const localTuiEntry = resolve("dist/tui.js");
+      const opencode = JSON.parse(stripJsonCommentsAndTrailingCommas(await readFile(join(dir, "opencode.jsonc"), "utf8"))) as {
+        plugin: unknown[];
+      };
+      const tui = JSON.parse(stripJsonCommentsAndTrailingCommas(await readFile(join(dir, "tui.json"), "utf8"))) as {
+        plugin: unknown[];
+      };
+      expect(opencode.plugin).toEqual([localServerEntry]);
+      expect(tui.plugin).toEqual([localTuiEntry]);
+    } finally {
+      process.chdir(originalCwd);
+      await rm(dir, { recursive: true, force: true });
+      await rm(projectDir, { recursive: true, force: true });
+      await rm(dataDir, { recursive: true, force: true });
+    }
+  });
+
   test("debug leaves an existing config.jsonc untouched", async () => {
     const dir = await mkdtemp(join(tmpdir(), "opencode-insights-test-"));
     const projectDir = await mkdtemp(join(tmpdir(), "opencode-insights-project-"));
