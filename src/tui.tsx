@@ -408,7 +408,6 @@ function SessionAnalysisDialog(props: {
         </text>
       </box>
       <scrollbox
-        verticalScrollbarOptions={{ visible: true }}
         maxHeight={maxHeight}
         flexGrow={1}
         paddingTop={1}

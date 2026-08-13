@@ -95,11 +95,12 @@ The `uninstall` command removes plugin config entries and local Insights data; i
 - A collapsible session-wide `Token Usage` sidebar showing total tokens, response count, input/output/reasoning usage, cache read/write usage, and aggregate cache rate. It loads completed responses already present in the session and continues updating live.
 - An opt-in `Go Usage` sidebar showing OpenCode Go rolling/weekly/monthly usage limits for sessions that use the `opencode-go` provider.
 - Subagent status (running, done, failed, elapsed time, and token/context usage) in the sidebar.
+- A collapsible `Session Analysis` sidebar showing the active session's aggregated activity (tool calls, skills, auto-compactions, warnings, model requests, subagent tree). Click it to open a detail dialog; its vertical scrollbar appears only when the content overflows the dialog.
 - Local capture of OpenCode hook/event data without redaction.
 - A local web viewer for reconstructed sessions, user turns, hidden request context, system/messages transforms, and assistant thinking/response sequences.
 - Native OpenCode footer components (project directory and version) remain visible — the plugin does not override `sidebar_footer` or `home_prompt_right` slots.
 
-The right sidebar contains the plugin sections: `Token Usage`, `Go Usage` (when enabled and the session uses `opencode-go`), and `Subagents`. Click any section header to collapse or expand it. Token usage is aggregated across the full session; prompt-right `used` and `cache` values continue to represent the latest completed assistant response.
+The right sidebar contains the plugin sections: `Token Usage`, `Go Usage` (when enabled and the session uses `opencode-go`), `Subagents`, and `Session Analysis`. Click any section header to collapse or expand it. Token usage is aggregated across the full session; prompt-right `used` and `cache` values continue to represent the latest completed assistant response.
 
 ## TUI Metrics Configuration
 

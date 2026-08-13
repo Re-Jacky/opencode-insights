@@ -300,9 +300,11 @@ A custom `Dialog` body (not `DialogSelect`, which forces a hidden
 scrollbar) containing:
 
 - Title row with the session label and an `esc` close hint.
-- A `<scrollbox>` with `verticalScrollbarOptions={{ visible: true }}`,
-  `maxHeight` sized to the terminal, and native wheel/keyboard/accelerated
-  scrolling.
+- A `<scrollbox>` with `maxHeight` sized to the terminal and native
+  wheel/keyboard/accelerated scrolling. The vertical scrollbar is never
+  forced on: it appears only when the content overflows the dialog
+  (`verticalScrollbarOptions` does not pin `visible: true`, which would
+  otherwise override the library's auto-hide).
 - Tree-formatted rows with per-depth indentation built from
   `childrenByParent` + `bySessionID`:
 

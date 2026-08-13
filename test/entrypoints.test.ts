@@ -54,4 +54,12 @@ describe("plugin entrypoints", () => {
     expect(source).toContain("buildSessionAnalysisRows");
     expect(source).toContain("treeActivity");
   });
+
+  test("session analysis dialog does not force the scrollbar visible", () => {
+    const source = readFileSync(new URL("../src/tui.tsx", import.meta.url), "utf8");
+    const dialog = source.slice(source.indexOf("function SessionAnalysisDialog"));
+
+    expect(dialog).toContain("<scrollbox");
+    expect(dialog).not.toContain("verticalScrollbarOptions={{ visible: true }}");
+  });
 });
