@@ -47,6 +47,7 @@
   "scripts": {
     "build": "tsup",
     "debug": "npm run build && node dist/cli.js debug",
+    "revert-debug": "node dist/cli.js revert",
     "postinstall": "npm rebuild better-sqlite3",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",

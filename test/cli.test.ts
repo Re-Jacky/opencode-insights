@@ -5,6 +5,7 @@ import {
   formatSessionSummary,
   parseOptions,
   removePlugin,
+  revertOpenCodeDebug,
   stripJsonCommentsAndTrailingCommas,
   summarizeSessions,
   uninstallOpenCode,
@@ -368,6 +369,139 @@ describe("cli helpers", () => {
       await rm(dir, { recursive: true, force: true });
       await rm(projectDir, { recursive: true, force: true });
       await rm(dataDir, { recursive: true, force: true });
+    }
+  });
+
+
+  test("revert swaps local build output back to the official package", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "opencode-insights-test-"));
+    try {
+      await writeFile(
+        join(dir, "opencode.jsonc"),
+        '{\n  // Keep this comment when revert updates the plugin.\n  "plugin": ["existing", "/Users/me/opencode-insights/dist/index.js",],\n}\n',
+        "utf8"
+      );
+      await writeFile(
+        join(dir, "tui.json"),
+        '{\n  // Keep this TUI comment too.\n  "plugin": ["/Users/me/opencode-insights/dist/tui.js"]\n}\n',
+        "utf8"
+      );
+
+      const output = await revertOpenCodeDebug({
+        configDir: dir,
+        limit: 20,
+        limitProvided: false,
+        json: false,
+        dryRun: false,
+        keepData: false
+      });
+
+      const opencodeText = await readFile(join(dir, "opencode.jsonc"), "utf8");
+      const tuiText = await readFile(join(dir, "tui.json"), "utf8");
+      const opencode = JSON.parse(stripJsonCommentsAndTrailingCommas(opencodeText)) as { plugin: unknown[] };
+      const tui = JSON.parse(stripJsonCommentsAndTrailingCommas(tuiText)) as { plugin: unknown[] };
+      expect(output).toContain("Reverted to the official package");
+      expect(opencodeText).toContain("Keep this comment");
+      expect(tuiText).toContain("Keep this TUI comment");
+      expect(opencode.plugin).toEqual(["existing", "@rejacky/opencode-insights@latest"]);
+      expect(tui.plugin).toEqual(["@rejacky/opencode-insights@latest"]);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("revert reports when no local build output is present", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "opencode-insights-test-"));
+    try {
+      const source = '{\n  "plugin": ["existing", "@rejacky/opencode-insights@latest"]\n}\n';
+      await writeFile(join(dir, "opencode.jsonc"), source, "utf8");
+
+      const output = await revertOpenCodeDebug({
+        configDir: dir,
+        limit: 20,
+        limitProvided: false,
+        json: false,
+        dryRun: false,
+        keepData: false
+      });
+
+      expect(output).toContain("not present (local build output)");
+      expect(await readFile(join(dir, "opencode.jsonc"), "utf8")).toBe(source);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("revert dry run leaves configs unchanged", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "opencode-insights-test-"));
+    try {
+      const source = '{\n  "plugin": ["/Users/me/opencode-insights/dist/index.js"]\n}\n';
+      await writeFile(join(dir, "opencode.json"), source, "utf8");
+
+      const output = await revertOpenCodeDebug({
+        configDir: dir,
+        limit: 20,
+        limitProvided: false,
+        json: false,
+        dryRun: true,
+        keepData: false
+      });
+
+      expect(output).toContain("would replace");
+      expect(output).toContain("Dry run: no files written");
+      expect(await readFile(join(dir, "opencode.json"), "utf8")).toBe(source);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("revert skips missing config files", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "opencode-insights-test-"));
+    try {
+      await writeFile(join(dir, "tui.json"), '{"plugin": ["/Users/me/opencode-insights/dist/tui.js"]}\n', "utf8");
+
+      const output = await revertOpenCodeDebug({
+        configDir: dir,
+        limit: 20,
+        limitProvided: false,
+        json: false,
+        dryRun: false,
+        keepData: false
+      });
+
+      expect(output).toContain("Server plugin: config not found");
+      expect(output).toContain("TUI plugin: replaced local build with @rejacky/opencode-insights@latest");
+      const tui = JSON.parse(await readFile(join(dir, "tui.json"), "utf8")) as { plugin: unknown[] };
+      expect(tui.plugin).toEqual(["@rejacky/opencode-insights@latest"]);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("revert collapses a stale dev path when the official spec is already present", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "opencode-insights-test-"));
+    try {
+      await writeFile(
+        join(dir, "opencode.jsonc"),
+        '{\n  "plugin": ["@rejacky/opencode-insights@latest", "/Users/me/opencode-insights/dist/index.js"]\n}\n',
+        "utf8"
+      );
+
+      await revertOpenCodeDebug({
+        configDir: dir,
+        limit: 20,
+        limitProvided: false,
+        json: false,
+        dryRun: false,
+        keepData: false
+      });
+
+      const opencode = JSON.parse(stripJsonCommentsAndTrailingCommas(await readFile(join(dir, "opencode.jsonc"), "utf8"))) as {
+        plugin: unknown[];
+      };
+      expect(opencode.plugin).toEqual(["@rejacky/opencode-insights@latest"]);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
     }
   });
 

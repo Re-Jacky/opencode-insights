@@ -8,7 +8,7 @@ OpenCode plugin `@rejacky/opencode-insights` — local, unredacted capture of Op
 - `npm run typecheck` — `tsc --noEmit` (strict + `noUncheckedIndexedAccess` + `exactOptionalPropertyTypes`).
 - `npm test` — `vitest run` (tests live in `test/**/*.test.ts`, `restoreMocks: true`).
 - `npm run build` — tsup, ESM-only, three entries (`index`, `tui`, `cli`). `@opencode-ai/plugin`, `@opentui/*`, `solid-js` are externalized.
-- `npm run debug` — builds then runs `node dist/cli.js debug`; requires a build first.
+- `npm run debug` — builds then runs `node dist/cli.js debug` to point the OpenCode configs at the local build; `npm run revert-debug` runs `node dist/cli.js revert` to restore the official `@rejacky/opencode-insights@latest` package. Requires a build first.
 - No linter or formatter is configured.
 - `postinstall` runs `npm rebuild better-sqlite3` (native module). `prepack` runs the build.
 

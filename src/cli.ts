@@ -129,6 +129,11 @@ async function main(argv: string[]) {
     return;
   }
 
+  if (command === "revert") {
+    process.stdout.write(`${await revertOpenCodeDebug(options)}\n`);
+    return;
+  }
+
   if (command === "uninstall") {
     process.stdout.write(`${await uninstallOpenCode(options)}\n`);
     return;
@@ -360,6 +365,61 @@ export async function configureOpenCodeDebug(options: CliOptions) {
   return lines.join("\n");
 }
 
+export async function revertOpenCodeDebug(options: CliOptions) {
+  const configDir = options.configDir ?? defaultOpenCodeConfigDir();
+  const opencodePath = resolveOpenCodeConfigPath(configDir);
+  const tuiPath = join(configDir, "tui.json");
+  const officialSpec = `${SERVER_PLUGIN_SPEC}@latest`;
+
+  const lines = [
+    `OpenCode config: ${opencodePath}`,
+    `TUI config: ${tuiPath}`,
+    `Official plugin spec: ${officialSpec}`,
+    `Server plugin: ${await revertPluginToOfficial(opencodePath, officialSpec, options)}`,
+    `TUI plugin: ${await revertPluginToOfficial(tuiPath, officialSpec, options)}`
+  ];
+
+  if (options.dryRun) {
+    lines.push("Dry run: no files written.");
+  } else {
+    lines.push("Reverted to the official package. Restart OpenCode to load it.");
+  }
+  return lines.join("\n");
+}
+
+async function revertPluginToOfficial(path: string, officialSpec: string, options: CliOptions) {
+  if (!existsSync(path)) return "config not found";
+  const source = await readJsonConfigSource(path);
+  const config = await readJsonConfig(path, { plugin: [] }, source);
+  const current = Array.isArray(config.plugin) ? config.plugin : [];
+  let changed = false;
+  const next = current.map((entry) => {
+    if (!isLocalDistEntry(entry)) return entry;
+    changed = true;
+    return officialSpec;
+  });
+  if (!changed) return "not present (local build output)";
+  config.plugin = dedupeStrings(next);
+  if (options.dryRun) return `would replace local build with ${officialSpec}`;
+  await writeJsonConfig(path, config, source);
+  return `replaced local build with ${officialSpec}`;
+}
+
+function isLocalDistEntry(entry: unknown): boolean {
+  const spec = Array.isArray(entry) ? entry[0] : entry;
+  return typeof spec === "string" && /\/opencode-insights\/dist\/(?:index|tui)\.js$/u.test(spec);
+}
+
+function dedupeStrings(values: unknown[]) {
+  const seen = new Set<string>();
+  return values.filter((value) => {
+    if (typeof value !== "string") return true;
+    if (seen.has(value)) return false;
+    seen.add(value);
+    return true;
+  });
+}
+
 export function defaultOpenCodeConfigDir() {
   const override = process.env.OPENCODE_CONFIG_DIR;
   if (override) return override;
@@ -553,6 +613,7 @@ function usage() {
   return [
     "Usage:",
     "  opencode-insights debug [--config-dir DIR] [--dry-run]",
+    "  opencode-insights revert [--config-dir DIR] [--dry-run]",
     "  opencode-insights uninstall [--config-dir DIR] [--keep-data] [--dry-run]",
     "  opencode-insights recent [--limit N] [--json]",
     "  opencode-insights sessions [--limit N] [--json]",
