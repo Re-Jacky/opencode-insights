@@ -333,8 +333,8 @@ export async function configureOpenCodeDebug(options: CliOptions) {
   const tuiSource = await readJsonConfigSource(tuiPath);
   const opencodeConfig = await readJsonConfig(opencodePath, { plugin: [] }, opencodeSource);
   const tuiConfig = await readJsonConfig(tuiPath, { plugin: [] }, tuiSource);
-  setSinglePluginSpec(opencodeConfig, SERVER_PLUGIN_SPEC, localServerEntry);
-  setSinglePluginSpec(tuiConfig, TUI_PLUGIN_SPEC, localTuiEntry);
+  setSinglePluginSpec(opencodeConfig, localServerEntry);
+  setSinglePluginSpec(tuiConfig, localTuiEntry);
   removePlugin(tuiConfig, SUBPATH_TUI_PLUGIN_SPEC);
 
   const lines = [
@@ -460,19 +460,22 @@ function isPluginEntry(entry: unknown, plugin: string) {
   return entry === plugin || (Array.isArray(entry) && entry[0] === plugin);
 }
 
-function setSinglePluginSpec(config: JsonObject, previousPlugin: string, nextPlugin: unknown, nextPluginSpec?: string) {
+function setSinglePluginSpec(config: JsonObject, nextPlugin: unknown) {
   const current = Array.isArray(config.plugin) ? config.plugin : [];
-  const localPlugin = nextPluginSpec ?? (typeof nextPlugin === "string" ? nextPlugin : "");
-  const next = current.filter((entry) => !isInsightsPluginEntry(entry, previousPlugin, localPlugin));
+  const next = current.filter((entry) => !isInsightsPluginEntry(entry));
   config.plugin = [...next, nextPlugin];
 }
 
-function isInsightsPluginEntry(entry: unknown, packagePlugin: string, localPlugin: string) {
-  if (isPluginEntry(entry, packagePlugin) || isPluginEntry(entry, localPlugin) || isPluginEntry(entry, SUBPATH_TUI_PLUGIN_SPEC)) {
-    return true;
-  }
+function isInsightsPluginEntry(entry: unknown): boolean {
   const spec = Array.isArray(entry) ? entry[0] : entry;
   if (typeof spec !== "string") return false;
+  return isInsightsSpec(spec);
+}
+
+function isInsightsSpec(spec: string): boolean {
+  if (spec === SERVER_PLUGIN_SPEC || spec === SUBPATH_TUI_PLUGIN_SPEC) return true;
+  if (spec.startsWith("npm:")) return isInsightsSpec(spec.slice(4));
+  if (spec.startsWith(`${SERVER_PLUGIN_SPEC}@`)) return true;
   return /(?:^|[/@-])opencode-insights.*\.tgz$/u.test(spec) || /\/opencode-insights\/dist\/(?:index|tui)\.js$/u.test(spec);
 }
 

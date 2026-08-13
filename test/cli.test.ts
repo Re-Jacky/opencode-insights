@@ -209,6 +209,91 @@ describe("cli helpers", () => {
     }
   });
 
+  test("debug replaces a version-suffixed official spec without duplicating", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "opencode-insights-test-"));
+    const projectDir = await mkdtemp(join(tmpdir(), "opencode-insights-project-"));
+    const dataDir = await mkdtemp(join(tmpdir(), "opencode-insights-data-"));
+    const originalCwd = process.cwd();
+    try {
+      await mkdir(join(projectDir, "dist"), { recursive: true });
+      await writeFile(join(projectDir, "dist", "index.js"), "", "utf8");
+      await writeFile(join(projectDir, "dist", "tui.js"), "", "utf8");
+      await writeFile(
+        join(dir, "opencode.jsonc"),
+        '{\n  "plugin": ["existing", "@rejacky/opencode-insights@latest"]\n}\n',
+        "utf8"
+      );
+      await writeFile(join(dir, "tui.json"), '{"plugin": ["@rejacky/opencode-insights@latest"]}\n', "utf8");
+
+      process.chdir(projectDir);
+      await configureOpenCodeDebug({
+        configDir: dir,
+        dataDir,
+        limit: 20,
+        limitProvided: false,
+        json: false,
+        dryRun: false,
+        keepData: false
+      });
+
+      const localServerEntry = resolve("dist/index.js");
+      const localTuiEntry = resolve("dist/tui.js");
+      const opencode = JSON.parse(stripJsonCommentsAndTrailingCommas(await readFile(join(dir, "opencode.jsonc"), "utf8"))) as {
+        plugin: unknown[];
+      };
+      const tui = JSON.parse(stripJsonCommentsAndTrailingCommas(await readFile(join(dir, "tui.json"), "utf8"))) as {
+        plugin: unknown[];
+      };
+      expect(opencode.plugin).toEqual(["existing", localServerEntry]);
+      expect(tui.plugin).toEqual([localTuiEntry]);
+    } finally {
+      process.chdir(originalCwd);
+      await rm(dir, { recursive: true, force: true });
+      await rm(projectDir, { recursive: true, force: true });
+      await rm(dataDir, { recursive: true, force: true });
+    }
+  });
+
+  test("debug replaces npm:-prefixed and pinned official specs", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "opencode-insights-test-"));
+    const projectDir = await mkdtemp(join(tmpdir(), "opencode-insights-project-"));
+    const dataDir = await mkdtemp(join(tmpdir(), "opencode-insights-data-"));
+    const originalCwd = process.cwd();
+    try {
+      await mkdir(join(projectDir, "dist"), { recursive: true });
+      await writeFile(join(projectDir, "dist", "index.js"), "", "utf8");
+      await writeFile(join(projectDir, "dist", "tui.js"), "", "utf8");
+      await writeFile(
+        join(dir, "opencode.jsonc"),
+        '{\n  "plugin": ["npm:@rejacky/opencode-insights", "@rejacky/opencode-insights@0.2.0"]\n}\n',
+        "utf8"
+      );
+      await writeFile(join(dir, "tui.json"), '{"plugin": []}\n', "utf8");
+
+      process.chdir(projectDir);
+      await configureOpenCodeDebug({
+        configDir: dir,
+        dataDir,
+        limit: 20,
+        limitProvided: false,
+        json: false,
+        dryRun: false,
+        keepData: false
+      });
+
+      const localServerEntry = resolve("dist/index.js");
+      const opencode = JSON.parse(stripJsonCommentsAndTrailingCommas(await readFile(join(dir, "opencode.jsonc"), "utf8"))) as {
+        plugin: unknown[];
+      };
+      expect(opencode.plugin).toEqual([localServerEntry]);
+    } finally {
+      process.chdir(originalCwd);
+      await rm(dir, { recursive: true, force: true });
+      await rm(projectDir, { recursive: true, force: true });
+      await rm(dataDir, { recursive: true, force: true });
+    }
+  });
+
   test("debug leaves an existing config.jsonc untouched", async () => {
     const dir = await mkdtemp(join(tmpdir(), "opencode-insights-test-"));
     const projectDir = await mkdtemp(join(tmpdir(), "opencode-insights-project-"));
