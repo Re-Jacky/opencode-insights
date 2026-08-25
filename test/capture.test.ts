@@ -34,7 +34,8 @@ describe("full-fidelity local capture", () => {
 
     await expect(readInsightsConfig({ dataDir })).resolves.toEqual({
       promptRightMetrics: ["tps", "avg", "used", "cache"],
-      goUsage: { enabled: false, cookie: "", workspaceID: "", refreshMs: 300_000 }
+      goUsage: { enabled: false, cookie: "", workspaceID: "", refreshMs: 300_000 },
+      copilotUsage: { enabled: false, token: "", refreshMs: 300_000 }
     });
     const jsonc = await readFile(resolveInsightsConfigPath({ dataDir }), "utf8");
     expect(jsonc).toContain('"promptRightMetrics"');
@@ -55,6 +56,7 @@ describe("full-fidelity local capture", () => {
     await expect(readInsightsConfig({ dataDir })).resolves.toEqual({
       promptRightMetrics: ["tps", "avg", "used", "cache"],
       goUsage: { enabled: false, cookie: "", workspaceID: "", refreshMs: 300_000 },
+      copilotUsage: { enabled: false, token: "", refreshMs: 300_000 },
       dbPath: "/tmp/custom.sqlite",
       retentionDays: 0
     });
@@ -82,6 +84,7 @@ describe("full-fidelity local capture", () => {
     await expect(readInsightsConfig({ dataDir })).resolves.toEqual({
       promptRightMetrics: ["used"],
       goUsage: { enabled: false, cookie: "", workspaceID: "", refreshMs: 300_000 },
+      copilotUsage: { enabled: false, token: "", refreshMs: 300_000 },
       retentionDays: 7
     });
   });
@@ -105,7 +108,8 @@ describe("full-fidelity local capture", () => {
 
     await expect(readInsightsConfig({ dataDir })).resolves.toEqual({
       promptRightMetrics: ["used", "cache"],
-      goUsage: { enabled: false, cookie: "", workspaceID: "", refreshMs: 300_000 }
+      goUsage: { enabled: false, cookie: "", workspaceID: "", refreshMs: 300_000 },
+      copilotUsage: { enabled: false, token: "", refreshMs: 300_000 }
     });
   });
 
@@ -131,7 +135,8 @@ describe("full-fidelity local capture", () => {
 
     await expect(readInsightsConfig({ dataDir })).resolves.toEqual({
       promptRightMetrics: ["tps", "used"],
-      goUsage: { enabled: true, cookie: "Fe26.2**abc", workspaceID: "wrk_1", refreshMs: 600_000 }
+      goUsage: { enabled: true, cookie: "Fe26.2**abc", workspaceID: "wrk_1", refreshMs: 600_000 },
+      copilotUsage: { enabled: false, token: "", refreshMs: 300_000 }
     });
   });
 

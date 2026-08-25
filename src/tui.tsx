@@ -2,7 +2,7 @@
 import { createTextAttributes, StyledText, type MouseEvent, type TextChunk, type TextRenderable } from "@opentui/core";
 import type { TuiPlugin, TuiPluginApi, TuiPluginModule } from "@opencode-ai/plugin/tui";
 import { createSignal, For, onCleanup, onMount } from "solid-js";
-import { readInsightsConfig, type InsightsConfig } from "./capture.js";
+import { readInsightsConfig, resolveCopilotToken, type InsightsConfig } from "./capture.js";
 import { createListenerRegistry, type Listener } from "./listeners.js";
 import { hasRenderStateChanged } from "./render-state.js";
 import {
@@ -14,6 +14,15 @@ import {
   type GoUsageRow,
   type GoUsageState
 } from "./go-usage.js";
+import {
+  copilotUsageRow,
+  copilotUsageSectionVisible,
+  createCopilotProviderTracker,
+  createCopilotUsageRefresher,
+  formatCopilotUsageRow,
+  type CopilotUsageRow,
+  type CopilotUsageState
+} from "./copilot-usage.js";
 import {
   createMetricsState,
   recordAssistantDelta,
@@ -234,6 +243,96 @@ function renderGoUsageSidebar(
       }
     } else if (error) {
       chunks.push(textChunk(`Go usage: ${error}`, api.theme.current.error));
+    }
+  }
+  return new StyledText(chunks);
+}
+
+function CopilotUsageSidebar(props: {
+  api: TuiPluginApi;
+  state: CopilotUsageState;
+  config: InsightsConfig;
+  token: string;
+  tracker: ReturnType<typeof createCopilotProviderTracker>;
+  sessionID: string;
+  subscribe: (listener: Listener) => () => void;
+  copilotUsageSubscribe: (listener: Listener) => () => void;
+  refresh: () => void;
+}) {
+  let text: TextRenderable | undefined;
+  const [collapsed, setCollapsed] = createSignal(false);
+  const titleAttributes = createTextAttributes({ bold: true });
+  let previous: { content: string; visible: boolean; height: number | string } | undefined;
+
+  const toggle = (event: MouseEvent) => {
+    if (!text || event.y !== text.y) return;
+    setCollapsed((prev) => !prev);
+    sync();
+  };
+
+  const sync = () => {
+    if (!text) return;
+    const visible = copilotUsageSectionVisible(props.config, props.token, props.tracker.usesCopilot(props.sessionID));
+    if (visible) props.refresh();
+    const row = visible ? copilotUsageRow(props.state.data ?? ({} as never), Date.now()) : undefined;
+    const error = props.state.error;
+    const showContent = visible && (row || error);
+    const signature = showContent ? JSON.stringify({ collapsed: collapsed(), row, error }) : "";
+    const next: { content: string; visible: boolean; height: number | "auto" } = {
+      content: signature,
+      visible: signature.length > 0,
+      height: signature.length > 0 ? "auto" : 0
+    };
+    if (!hasRenderStateChanged(previous, next)) return;
+    previous = next;
+    text.visible = next.visible;
+    text.height = next.height;
+    text.content = showContent ? renderCopilotUsageSidebar(row, error, props.api, titleAttributes, collapsed()) : "";
+    props.api.renderer.requestRender();
+  };
+
+  const unsubscribe = props.subscribe(sync);
+  const unsubscribeCopilot = props.copilotUsageSubscribe(sync);
+  const timer = setInterval(sync, 1_000);
+  onCleanup(() => {
+    unsubscribe();
+    unsubscribeCopilot();
+    clearInterval(timer);
+  });
+
+  return (
+    <text
+      ref={(ref: TextRenderable) => {
+        text = ref;
+        sync();
+      }}
+      onMouseDown={toggle}
+      fg={props.api.theme.current.textMuted}
+    >
+      {""}
+    </text>
+  );
+}
+
+function renderCopilotUsageSidebar(
+  row: CopilotUsageRow | undefined,
+  error: string | undefined,
+  api: TuiPluginApi,
+  titleAttributes: number,
+  collapsed: boolean
+) {
+  const chunks: TextChunk[] = [
+    textChunk(`${collapsed ? "▶" : "▼"} Copilot\n`, api.theme.current.text, titleAttributes)
+  ];
+  if (!collapsed) {
+    if (row) {
+      const lines = formatCopilotUsageRow(row).split("\n");
+      for (const [index, line] of lines.entries()) {
+        if (index > 0) chunks.push(textChunk("\n"));
+        chunks.push(textChunk(line, api.theme.current.textMuted));
+      }
+    } else if (error) {
+      chunks.push(textChunk(`Copilot: ${error}`, api.theme.current.error));
     }
   }
   return new StyledText(chunks);
@@ -527,12 +626,20 @@ const tui: TuiPlugin = async (api, options) => {
   const metricListeners = createListenerRegistry();
   const subagentListeners = createListenerRegistry();
   const goUsageListeners = createListenerRegistry();
+  const copilotUsageListeners = createListenerRegistry();
   const hydratedSessions = new Set<string>();
   const goProviderTracker = createGoProviderTracker();
+  const copilotProviderTracker = createCopilotProviderTracker();
   const goUsage = createGoUsageRefresher(config.goUsage);
+  const copilotToken = resolveCopilotToken(config.copilotUsage);
+  const copilotUsage = createCopilotUsageRefresher(config.copilotUsage, copilotToken);
 
   const refreshGoUsage = async () => {
     if (await goUsage.refresh()) goUsageListeners.notify();
+  };
+
+  const refreshCopilotUsage = async () => {
+    if (await copilotUsage.refresh()) copilotUsageListeners.notify();
   };
 
   const hydrateSessionMetrics = async (sessionID: string) => {
@@ -546,6 +653,7 @@ const tui: TuiPlugin = async (api, options) => {
         const info = message.info;
         const providerID = (info as { providerID?: unknown }).providerID;
         goProviderTracker.record(sessionID, typeof providerID === "string" ? providerID : undefined);
+        copilotProviderTracker.record(sessionID, typeof providerID === "string" ? providerID : undefined);
         if (info.role !== "assistant" || typeof info.time.completed !== "number") continue;
         const input = {
           sessionID: info.sessionID,
@@ -584,6 +692,7 @@ const tui: TuiPlugin = async (api, options) => {
     const providerID =
       (info as { providerID?: unknown }).providerID ?? (info as { model?: { providerID?: unknown } }).model?.providerID;
     goProviderTracker.record(sessionID, typeof providerID === "string" ? providerID : undefined);
+    copilotProviderTracker.record(sessionID, typeof providerID === "string" ? providerID : undefined);
     if (info.role !== "assistant") return;
 
     const messageInput: {
@@ -710,6 +819,17 @@ const tui: TuiPlugin = async (api, options) => {
             subscribe={metricListeners.subscribe}
             goUsageSubscribe={goUsageListeners.subscribe}
             refresh={() => void refreshGoUsage()}
+          />
+          <CopilotUsageSidebar
+            api={api}
+            state={copilotUsage.state}
+            config={config}
+            token={copilotToken}
+            tracker={copilotProviderTracker}
+            sessionID={props.session_id}
+            subscribe={metricListeners.subscribe}
+            copilotUsageSubscribe={copilotUsageListeners.subscribe}
+            refresh={() => void refreshCopilotUsage()}
           />
           <SubagentSidebar
             api={api}

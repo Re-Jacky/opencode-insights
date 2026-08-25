@@ -45,9 +45,16 @@ export type GoUsageConfig = {
   refreshMs: number;
 };
 
+export type CopilotUsageConfig = {
+  enabled: boolean;
+  token: string;
+  refreshMs: number;
+};
+
 export type InsightsConfig = {
   promptRightMetrics: PromptRightMetric[];
   goUsage: GoUsageConfig;
+  copilotUsage: CopilotUsageConfig;
   dbPath?: string | undefined;
   retentionDays?: number | undefined;
 };
@@ -55,7 +62,9 @@ export type InsightsConfig = {
 const DEFAULT_RETENTION_DAYS = 1;
 const DAY_MS = 24 * 60 * 60 * 1000;
 const DEFAULT_GO_USAGE_REFRESH_MS = 300_000;
+const DEFAULT_COPILOT_USAGE_REFRESH_MS = 300_000;
 const MIN_GO_USAGE_REFRESH_MS = 60_000;
+const MIN_COPILOT_USAGE_REFRESH_MS = 60_000;
 
 let sequence = 0;
 
@@ -197,7 +206,8 @@ function defaultInsightsConfigJsonc(): string {
     '  // "dbPath": "/absolute/path/to/insights.sqlite",',
     `  "retentionDays": ${DEFAULT_RETENTION_DAYS},`,
     `  "promptRightMetrics": ${JSON.stringify(DEFAULT_PROMPT_RIGHT_METRICS)},`,
-    `  "goUsage": ${JSON.stringify(defaultGoUsageConfig())}`,
+    `  "goUsage": ${JSON.stringify(defaultGoUsageConfig())},`,
+    `  "copilotUsage": ${JSON.stringify(defaultCopilotUsageConfig())}`,
     "}",
     ""
   ].join("\n");
@@ -208,11 +218,19 @@ export function insightsOptionsFromConfig(config: InsightsConfig, dataDir?: stri
 }
 
 function defaultInsightsConfig(): InsightsConfig {
-  return { promptRightMetrics: [...DEFAULT_PROMPT_RIGHT_METRICS], goUsage: defaultGoUsageConfig() };
+  return {
+    promptRightMetrics: [...DEFAULT_PROMPT_RIGHT_METRICS],
+    goUsage: defaultGoUsageConfig(),
+    copilotUsage: defaultCopilotUsageConfig()
+  };
 }
 
 function defaultGoUsageConfig(): GoUsageConfig {
   return { enabled: false, cookie: "", workspaceID: "", refreshMs: DEFAULT_GO_USAGE_REFRESH_MS };
+}
+
+function defaultCopilotUsageConfig(): CopilotUsageConfig {
+  return { enabled: false, token: "", refreshMs: DEFAULT_COPILOT_USAGE_REFRESH_MS };
 }
 
 function insightsConfigFrom(value: unknown): InsightsConfig {
@@ -230,6 +248,7 @@ function insightsConfigFrom(value: unknown): InsightsConfig {
   return {
     promptRightMetrics: metrics.length ? metrics : [...DEFAULT_PROMPT_RIGHT_METRICS],
     goUsage: goUsageConfigFrom(record.goUsage),
+    copilotUsage: copilotUsageConfigFrom(record.copilotUsage),
     dbPath,
     retentionDays
   };
@@ -248,8 +267,36 @@ function goUsageConfigFrom(value: unknown): GoUsageConfig {
   return { enabled, cookie, workspaceID, refreshMs };
 }
 
+function copilotUsageConfigFrom(value: unknown): CopilotUsageConfig {
+  const record = isRecord(value) ? value : {};
+  const enabled = record.enabled === true;
+  const token = typeof record.token === "string" && record.token.length > 0 ? record.token : "";
+  const refreshMs =
+    typeof record.refreshMs === "number" && Number.isFinite(record.refreshMs)
+      ? Math.max(MIN_COPILOT_USAGE_REFRESH_MS, Math.trunc(record.refreshMs))
+      : DEFAULT_COPILOT_USAGE_REFRESH_MS;
+  return { enabled, token, refreshMs };
+}
+
 function isPromptRightMetric(value: unknown): value is PromptRightMetric {
   return value === "tps" || value === "avg" || value === "ttft" || value === "used" || value === "cache" || value === "input" || value === "output" || value === "reasoning";
+}
+
+export function resolveCopilotToken(config: CopilotUsageConfig): string {
+  if (config.token.length > 0) return config.token;
+  try {
+    const authPath = join(homedir(), ".local/share/opencode/auth.json");
+    if (!existsSync(authPath)) return "";
+    const raw = readFileSync(authPath, "utf8");
+    const auth = JSON.parse(raw) as Record<string, unknown>;
+    const copilot = isRecord(auth?.["github-copilot"]) ? auth["github-copilot"] : undefined;
+    if (!copilot) return "";
+    const access = typeof copilot.access === "string" ? copilot.access : "";
+    const refresh = typeof copilot.refresh === "string" ? copilot.refresh : "";
+    return access || refresh;
+  } catch {
+    return "";
+  }
 }
 
 export function normalizeChatMessageCapture(input: unknown, output: unknown, timestamp = Date.now()): CaptureRecord {

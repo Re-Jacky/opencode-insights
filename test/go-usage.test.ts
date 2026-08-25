@@ -18,7 +18,8 @@ const FIXTURE = await readFile(new URL("./fixtures/go-usage-page.html", import.m
 
 const ENABLED_CONFIG: InsightsConfig = {
   promptRightMetrics: ["tps"],
-  goUsage: { enabled: true, cookie: "cookie", workspaceID: "wrk_1", refreshMs: 300_000 }
+  goUsage: { enabled: true, cookie: "cookie", workspaceID: "wrk_1", refreshMs: 300_000 },
+  copilotUsage: { enabled: false, token: "", refreshMs: 300_000 }
 };
 
 describe("goUsageSectionVisible", () => {
@@ -286,22 +287,31 @@ describe("formatUsageBar", () => {
 describe("formatGoUsageRow", () => {
   test("aligns label, percentage, bar and reset with generous spacing", () => {
     expect(formatGoUsageRow({ label: "Rolling", usagePercent: 12, reset: "2h 33m" })).toBe(
-      "Rolling  12% █▎░░░░░░░░ 2h 33m"
+      "Rolling  12%  █▎░░░░░░░░ 2h 33m"
     );
   });
 
   test("keeps the percentage column aligned for single and double digit values", () => {
     expect(formatGoUsageRow({ label: "Weekly", usagePercent: 11, reset: "5d 15h" })).toBe(
-      "Weekly   11% █▏░░░░░░░░ 5d 15h"
+      "Weekly   11%  █▏░░░░░░░░ 5d 15h"
     );
     expect(formatGoUsageRow({ label: "Monthly", usagePercent: 27, reset: "1d 17h" })).toBe(
-      "Monthly  27% ██▊░░░░░░░ 1d 17h"
+      "Monthly  27%  ██▊░░░░░░░ 1d 17h"
     );
   });
 
   test("fills the bar completely at 100 percent", () => {
     expect(formatGoUsageRow({ label: "Rolling", usagePercent: 100, reset: "0m" })).toBe(
       "Rolling  100% ██████████ 0m"
+    );
+  });
+
+  test("rounds fractional percentages to the nearest integer", () => {
+    expect(formatGoUsageRow({ label: "Rolling", usagePercent: 12.4, reset: "2h 33m" })).toBe(
+      "Rolling  12%  █▎░░░░░░░░ 2h 33m"
+    );
+    expect(formatGoUsageRow({ label: "Rolling", usagePercent: 12.6, reset: "2h 33m" })).toBe(
+      "Rolling  13%  █▎░░░░░░░░ 2h 33m"
     );
   });
 });

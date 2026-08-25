@@ -27,6 +27,7 @@ OpenCode plugin `@rejacky/opencode-insights` — local, unredacted capture of Op
 - `src/capture.ts` — normalizes every hook payload (`chat.*`, `event`, `tool.execute.*`) into a `CaptureRecord` and persists via `SqliteCaptureStore`. SQLite (better-sqlite3, lazily `import()`ed) with fallback to a `.jsonl` append store when unavailable. `openDatabase` tries better-sqlite3 then sql.js.
 - `src/inspect.ts` — reconstructs sessions from raw captures; `src/metrics.ts` — TPS/cache metrics and `promptRightMetrics`; `src/subagents.ts` — subagent tracking; `src/go-usage.ts` — opt-in Go usage fetch from opencode.ai (cookie + workspaceID); `src/viewer.ts` — local web viewer server; `src/cli.ts` + `src/cli-shim.ts` — CLI and the `~/.local/bin` shim.
 - `src/activity.ts` — session activity metrics (tool calls, skills, auto-compactions, steps) with per-metric keyed dedup; `src/activity-hydrate.ts` — history backfill via `session.list()`/`session.messages()`.
+- `src/go-usage.ts` — OpenCode Go usage (rolling/weekly/monthly limits); `src/copilot-usage.ts` — GitHub Copilot premium-interaction quota via `copilot_internal/user` API, auto-discovers token from OpenCode auth store.
 - `src/listeners.ts` / `src/render-state.ts` — tiny shared helpers for listener registries and state.
 
 ## Operational rules

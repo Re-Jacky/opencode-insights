@@ -81,7 +81,8 @@ export function formatUsageBar(usagePercent: number, width = 10): string {
 
 export function formatGoUsageRow(row: GoUsageRow): string {
   const bar = formatUsageBar(row.usagePercent);
-  return `${row.label.padEnd(9)}${`${row.usagePercent}%`.padEnd(3)} ${bar} ${row.reset}`;
+  const pct = `${Math.round(row.usagePercent)}%`;
+  return `${row.label.padEnd(9)}${pct.padEnd(4)} ${bar} ${row.reset}`;
 }
 
 export function goUsageSectionVisible(config: InsightsConfig, usesGoProvider: boolean): boolean {

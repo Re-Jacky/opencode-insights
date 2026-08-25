@@ -62,4 +62,14 @@ describe("plugin entrypoints", () => {
     expect(dialog).toContain("<scrollbox");
     expect(dialog).not.toContain("verticalScrollbarOptions={{ visible: true }}");
   });
+
+  test("renders the copilot usage sidebar with provider gate", () => {
+    const source = readFileSync(new URL("../src/tui.tsx", import.meta.url), "utf8");
+
+    expect(source).toContain("function CopilotUsageSidebar");
+    expect(source).toContain("copilotUsageSectionVisible");
+    expect(source).toContain("formatCopilotUsageRow");
+    expect(source).toContain("copilotProviderTracker");
+    expect(source).toContain("usesCopilot");
+  });
 });

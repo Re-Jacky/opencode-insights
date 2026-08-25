@@ -94,13 +94,14 @@ The `uninstall` command removes plugin config entries and local Insights data; i
 - Configurable live metrics in the OpenCode session prompt zone.
 - A collapsible session-wide `Token Usage` sidebar showing total tokens, response count, input/output/reasoning usage, cache read/write usage, and aggregate cache rate. It loads completed responses already present in the session and continues updating live.
 - An opt-in `Go Usage` sidebar showing OpenCode Go rolling/weekly/monthly usage limits for sessions that use the `opencode-go` provider.
+- An opt-in `Copilot Usage` sidebar showing GitHub Copilot premium-interaction quota, usage bar, and days until reset for sessions that use the `github-copilot` provider.
 - Subagent status (running, done, failed, elapsed time, and token/context usage) in the sidebar.
 - A collapsible `Session Analysis` sidebar showing the active session's aggregated activity (tool calls, skills, auto-compactions, warnings, model requests, subagent tree). Click it to open a detail dialog; its vertical scrollbar appears only when the content overflows the dialog.
 - Local capture of OpenCode hook/event data without redaction.
 - A local web viewer for reconstructed sessions, user turns, hidden request context, system/messages transforms, and assistant thinking/response sequences.
 - Native OpenCode footer components (project directory and version) remain visible — the plugin does not override `sidebar_footer` or `home_prompt_right` slots.
 
-The right sidebar contains the plugin sections: `Token Usage`, `Go Usage` (when enabled and the session uses `opencode-go`), `Subagents`, and `Session Analysis`. Click any section header to collapse or expand it. Token usage is aggregated across the full session; prompt-right `used` and `cache` values continue to represent the latest completed assistant response.
+The right sidebar contains the plugin sections: `Token Usage`, `Go Usage` (when enabled and the session uses `opencode-go`), `Copilot Usage` (when enabled and the session uses `github-copilot`), `Subagents`, and `Session Analysis`. Click any section header to collapse or expand it. Token usage is aggregated across the full session; prompt-right `used` and `cache` values continue to represent the latest completed assistant response.
 
 ## TUI Metrics Configuration
 
@@ -120,27 +121,67 @@ With a custom database path, the configuration file is created in that database'
 
 `promptRightMetrics` controls both the fields and their order. Supported values are `tps`, `avg`, `ttft`, `used`, `cache`, `input`, `output`, and `reasoning`. Values that are not recognized are ignored; an empty or invalid configuration uses the default. Restart OpenCode after editing this file.
 
-## Go Usage Configuration
+## Provider Usage Configuration
 
-The `Go Usage` sidebar shows the rolling (5 hour), weekly, and monthly usage limits of your OpenCode Go subscription for sessions that use the `opencode-go` provider. It is disabled by default and opt-in:
+The plugin can show usage sidebar sections for the AI provider used by the current session. Each section is opt-in, disabled by default, and only appears when the session uses the matching provider.
 
-```json
+```jsonc
 {
+  "promptRightMetrics": ["tps", "avg", "used", "cache"],
   "goUsage": {
-    "enabled": true,
-    "cookie": "Fe26.2**...",
-    "workspaceID": "wrk_...",
+    "enabled": false,
+    "cookie": "",
+    "workspaceID": "",
+    "refreshMs": 300000
+  },
+  "copilotUsage": {
+    "enabled": false,
+    "token": "",
     "refreshMs": 300000
   }
 }
 ```
 
-- `enabled` — set to `true` to activate the section. Defaults to `false`.
-- `cookie` — the `auth` session cookie for `opencode.ai` (see below).
-- `workspaceID` — your workspace id, visible in the console URL (`/workspace/<workspaceID>/go`).
-- `refreshMs` — how often to re-fetch usage from the console. Defaults to `300000` (5 minutes); values below 60000 are clamped.
+### Go Usage
 
-To get the cookie, log in to `https://opencode.ai`, open the workspace `/go` page, then copy the `auth` cookie value from your browser's DevTools (Application → Cookies → `https://opencode.ai`). The cookie lasts up to a year; if the section shows an error, copy it again. Restart OpenCode after editing this file.
+Shows rolling (5 hour), weekly, and monthly usage limits for OpenCode Go subscriptions. Only visible when the session uses the `opencode-go` provider.
+
+```jsonc
+"goUsage": {
+  "enabled": true,        // set to true to activate
+  "cookie": "Fe26.2**...", // auth session cookie from opencode.ai
+  "workspaceID": "wrk_...", // visible in the console URL
+  "refreshMs": 300000      // poll interval (min 60000)
+}
+```
+
+To get the cookie, log in to `https://opencode.ai`, open the workspace `/go` page, then copy the `auth` cookie value from your browser's DevTools (Application → Cookies → `https://opencode.ai`). The cookie lasts up to a year; if the section shows an error, copy it again.
+
+### Copilot Usage
+
+Shows GitHub Copilot premium-interaction quota (used/total, progress bar, days until reset). Only visible when the session uses the `github-copilot` provider.
+
+```jsonc
+"copilotUsage": {
+  "enabled": true,  // set to true to activate
+  "token": "",      // optional: manual token override
+  "refreshMs": 300000 // poll interval (min 60000)
+}
+```
+
+The `token` field is optional. If empty, the plugin reads the token from OpenCode's auth store (`~/.local/share/opencode/auth.json` → `github-copilot.access`). No manual setup is needed if you authenticate with Copilot through OpenCode.
+
+The section displays:
+
+```
+▼ Copilot
+Premium   84%  ████████░░  7d
+          2942 / 3500
+```
+
+When the quota is exhausted and overage is permitted, the bar fills to 100% and the percentage reflects actual usage.
+
+Restart OpenCode after editing this file.
 
 ## Open The Viewer
 
@@ -254,7 +295,8 @@ comments allowed). The plugin creates it on first run with `dbPath` commented ou
   // "dbPath": "/absolute/path/to/insights.sqlite",
   "retentionDays": 1,
   "promptRightMetrics": ["tps", "avg", "used", "cache"],
-  "goUsage": { "enabled": false, "cookie": "", "workspaceID": "", "refreshMs": 300000 }
+  "goUsage": { "enabled": false, "cookie": "", "workspaceID": "", "refreshMs": 300000 },
+  "copilotUsage": { "enabled": false, "token": "", "refreshMs": 300000 }
 }
 ```
 
