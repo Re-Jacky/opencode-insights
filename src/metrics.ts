@@ -231,22 +231,29 @@ export function getSessionTokenUsage(state: MetricsState, sessionID: string) {
   return state.sessionTokenUsageByID[sessionID];
 }
 
-export function renderSessionTokenUsage(state: MetricsState, sessionID: string) {
+export function renderSessionTokenUsage(state: MetricsState, sessionID: string, subagentTokens = 0) {
   const usage = getSessionTokenUsage(state, sessionID);
   if (!usage) return "";
 
+  const grandTotal = usage.totalTokens + subagentTokens;
   const cachePromptTokens = usage.inputTokens + usage.cacheReadTokens;
   const cacheRate = cachePromptTokens > 0 ? (usage.cacheReadTokens / cachePromptTokens) * 100 : undefined;
-  return [
+  const lines = [
     "Token Usage",
-    `${formatTokenCount(usage.totalTokens)} total · ${usage.responseCount} responses`,
+    `${formatTokenCount(grandTotal)} total · ${usage.responseCount} responses`
+  ];
+  if (subagentTokens > 0) {
+    lines.push(`${formatTokenCount(subagentTokens)} used by subagents`);
+  }
+  lines.push(
     `${formatTokenCount(usage.inputTokens)} input`,
     `${formatTokenCount(usage.outputTokens)} output`,
     `${formatTokenCount(usage.reasoningTokens)} reasoning`,
     `${formatTokenCount(usage.cacheReadTokens)} cache read`,
     `${formatTokenCount(usage.cacheWriteTokens)} cache write`,
     `${cacheRate === undefined ? "-" : formatPercent(cacheRate)} cache rate`
-  ].join("\n");
+  );
+  return lines.join("\n");
 }
 
 function pruneSamples(state: MetricsState, now = Date.now()) {

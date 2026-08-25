@@ -28,6 +28,7 @@ import {
   createSubagentState,
   getSubagentSidebarRowAtLine,
   getSubagentSidebarModel,
+  sumSubagentTokens,
   type SubagentState
 } from "./subagents.js";
 import {
@@ -100,6 +101,7 @@ function TokenUsageSidebar(props: {
   api: TuiPluginApi;
   sessionID: string;
   state: MetricsState;
+  subagentState: SubagentState;
   subscribe: (listener: Listener) => () => void;
   hydrate: () => void;
 }) {
@@ -116,7 +118,8 @@ function TokenUsageSidebar(props: {
 
   const sync = () => {
     if (!text) return;
-    const content = renderSessionTokenUsage(props.state, props.sessionID);
+    const subagentTokens = sumSubagentTokens(props.subagentState, props.sessionID);
+    const content = renderSessionTokenUsage(props.state, props.sessionID, subagentTokens);
     const next: { content: string; visible: boolean; height: number | "auto" } = {
       content: `${collapsed()}|${content}`,
       visible: content.length > 0,
@@ -694,6 +697,7 @@ const tui: TuiPlugin = async (api, options) => {
             api={api}
             sessionID={props.session_id}
             state={metrics}
+            subagentState={subagents}
             subscribe={metricListeners.subscribe}
             hydrate={() => void hydrateSessionMetrics(props.session_id)}
           />

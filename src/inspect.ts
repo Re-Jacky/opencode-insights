@@ -310,21 +310,19 @@ export function buildRequestHistory(records: CaptureRecord[]): RequestHistory {
     }
 
     if (type === "message.part.updated" || type === "message.part.delta") {
+      if (type === "message.part.delta") continue;
       const part = isRecord(properties.part) ? properties.part : {};
       const sessionID = optionalString(part.sessionID) ?? optionalString(properties.sessionID);
       const messageID = optionalString(part.messageID) ?? optionalString(properties.messageID);
       if (!sessionID || !messageID) continue;
       const partType = optionalString(part.type);
-      const field = optionalString(properties.field);
-      const delta = optionalString(properties.delta);
       const text = optionalString(part.text);
       const reasonText = optionalString(part.text) ?? optionalString(part.markdown);
       const targetResponse = responses.get(`${sessionID}:${messageID}`);
       if (targetResponse) {
-        targetResponse.events.push(record.payload);
+        if (partType === "tool") targetResponse.events.push(record.payload);
         if (partType === "text" && text !== undefined) targetResponse.text = text;
         if (partType === "reasoning" && reasonText !== undefined) targetResponse.reasoning = reasonText;
-        if (type === "message.part.delta" && field === "text" && delta !== undefined) targetResponse.text += delta;
         continue;
       }
       if (partType !== "text" && partType !== "reasoning") continue;
@@ -489,7 +487,6 @@ function viewerCaptureSql(limit: number) {
               and event_type in (
                 'message.updated',
                 'message.part.updated',
-                'message.part.delta',
                 'session.updated',
                 'session.created'
               )

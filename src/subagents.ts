@@ -54,6 +54,24 @@ export function createSubagentState(activityStore?: ActivityState): SubagentStat
   return { children: {}, totalExecuted: 0, ...(activityStore ? { activityStore } : {}) };
 }
 
+export function recordSubagentFromSessionInfo(
+  state: SubagentState,
+  session: { id: string; parentID?: string; title?: string }
+): void {
+  if (!session.parentID || !session.id || session.id === session.parentID) return;
+  if (state.children[session.id]) return;
+  const now = new Date().toISOString();
+  state.children[session.id] = {
+    id: session.id,
+    parentID: session.parentID,
+    title: session.title ?? "subagent",
+    status: "done",
+    startedAt: now,
+    updatedAt: now
+  };
+  state.totalExecuted += 1;
+}
+
 export function applySubagentEvent(state: SubagentState, event: unknown) {
   const created = extractTaskToolSubagent(event) ?? extractSubagent(event) ?? updateExistingSubagent(state, event);
   if (!created) return false;
@@ -118,6 +136,10 @@ export function getSubagentItems(state: SubagentState, parentID?: string) {
       if (statusRank !== 0) return statusRank;
       return b.startedAt.localeCompare(a.startedAt);
     });
+}
+
+export function sumSubagentTokens(state: SubagentState, parentID: string): number {
+  return getSubagentItems(state, parentID).reduce((sum, child) => sum + (child.tokens?.total ?? 0), 0);
 }
 
 export function pruneStaleSubagents(state: SubagentState, options: { now?: number; staleMs?: number } = {}) {

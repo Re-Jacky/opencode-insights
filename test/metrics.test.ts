@@ -137,4 +137,48 @@ describe("metrics tracking", () => {
 
     expect(getSessionTokenUsage(state, "ses_1")?.totalTokens).toBe(1_145);
   });
+
+  test("includes subagent tokens in grand total and shows subagent row", () => {
+    const state = createMetricsState();
+
+    recordAssistantMessage(state, {
+      sessionID: "ses_1",
+      messageID: "msg_1",
+      createdAt: 1_000,
+      completedAt: 2_000,
+      inputTokens: 100,
+      outputTokens: 20,
+      reasoningTokens: 5,
+      cacheReadTokens: 900,
+      cacheWriteTokens: 10
+    });
+
+    expect(renderSessionTokenUsage(state, "ses_1", 3_200)).toEqual([
+      "Token Usage",
+      "4.2k total · 1 responses",
+      "3.2k used by subagents",
+      "100 input",
+      "20 output",
+      "5 reasoning",
+      "900 cache read",
+      "10 cache write",
+      "90.00% cache rate"
+    ].join("\n"));
+  });
+
+  test("omits subagent row when subagent tokens are zero", () => {
+    const state = createMetricsState();
+
+    recordAssistantMessage(state, {
+      sessionID: "ses_1",
+      messageID: "msg_1",
+      createdAt: 1_000,
+      completedAt: 2_000,
+      inputTokens: 100,
+      outputTokens: 20
+    });
+
+    const result = renderSessionTokenUsage(state, "ses_1", 0);
+    expect(result).not.toContain("used by subagents");
+  });
 });
