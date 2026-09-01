@@ -70,8 +70,9 @@ describe("metrics tracking", () => {
     expect(renderResponseMetricsText(state, "ses_1")).toBe(
       "10.4k used | 90.00% cache | 200 out | 50 think"
     );
+    // Per-message AVG now computed via wall time fallback (250 tok /2s =125) even without prior timing (hydrate)
     expect(renderPromptRightMetricsText(state, "ses_1", { idle: true })).toBe(
-      "TPS - | AVG - | 10.4k used | 90.00% cache"
+      "TPS - | AVG 125 | 10.4k used | 90.00% cache"
     );
     expect(renderPromptRightMetricsText(state, "ses_1", { idle: true, metrics: ["used", "cache"] })).toBe(
       "10.4k used | 90.00% cache"

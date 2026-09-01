@@ -648,7 +648,11 @@ const tui: TuiPlugin = async (api, options) => {
 
     try {
       const response = await api.client.session.messages({ sessionID });
-      const messages = response.data ?? [];
+      const messages = (response.data ?? []).slice().sort((a, b) => {
+        const aCreated = (a.info as { time?: { created?: unknown } }).time?.created;
+        const bCreated = (b.info as { time?: { created?: unknown } }).time?.created;
+        return (typeof aCreated === "number" ? aCreated : 0) - (typeof bCreated === "number" ? bCreated : 0);
+      });
       for (const message of messages) {
         const info = message.info;
         const providerID = (info as { providerID?: unknown }).providerID;

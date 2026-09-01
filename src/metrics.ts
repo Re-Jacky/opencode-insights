@@ -19,6 +19,20 @@ export type SessionAverage = {
   messageCount: number;
 };
 
+/**
+ * Per-message metrics for input-box (current round).
+ * AVG = totalTokens(=output+reasoning)/duration where duration = firstTokenAt→endAt (fallback completed-created if hydrated).
+ * TTFT = firstTokenAt - requestStartAt. TPS = live estimated tokens / active burst duration (5s window) for this messageID only.
+ * Session totals (Token Usage sidebar) remain in SessionTokenUsage/sessionAverageByID (deprecated for prompt-right).
+ */
+export type MessageMetrics = {
+  totalTokens: number;
+  durationMs: number;
+  ttftMs: number | undefined;
+  createdAt: number;
+  completedAt: number;
+};
+
 export type AssistantResponseUsage = {
   inputTokens?: number | undefined;
   outputTokens?: number | undefined;
@@ -44,7 +58,10 @@ export const DEFAULT_PROMPT_RIGHT_METRICS: PromptRightMetric[] = ["tps", "avg", 
 
 export type MetricsState = {
   streamSamplesBySession: Record<string, StreamSample[]>;
+  streamSamplesByMessageID: Record<string, StreamSample[]>;
   messageTimingByID: Record<string, MessageTiming>;
+  messageMetricsByID: Record<string, MessageMetrics>;
+  latestMessageIDBySession: Record<string, string>;
   sessionAverageByID: Record<string, SessionAverage>;
   latestResponseUsageBySession: Record<string, AssistantResponseUsage>;
   responseUsageByMessageID: Record<string, { sessionID: string; usage: AssistantResponseUsage }>;
@@ -58,7 +75,10 @@ const SINGLE_SAMPLE_MS = 1_000;
 export function createMetricsState(): MetricsState {
   return {
     streamSamplesBySession: {},
+    streamSamplesByMessageID: {},
     messageTimingByID: {},
+    messageMetricsByID: {},
+    latestMessageIDBySession: {},
     sessionAverageByID: {},
     latestResponseUsageBySession: {},
     responseUsageByMessageID: {},
@@ -66,6 +86,10 @@ export function createMetricsState(): MetricsState {
   };
 }
 
+/**
+ * Estimated tokens for live TPS: ceil(bytes/5). Differs from per-message AVG which uses real output+reasoning tokens.
+ * Multibyte (CJK/emoji) inflates bytes but may over/undercount vs real tokenizer.
+ */
 export function estimateStreamTokens(delta: string) {
   return Math.max(1, Math.ceil(Buffer.byteLength(delta, "utf8") / 5));
 }
@@ -95,6 +119,8 @@ export function recordAssistantMessage(
       lastTokenAt: existing?.lastTokenAt,
       lastToolCallAt: existing?.lastToolCallAt
     };
+    // Track latest message for per-message live TPS even before completion
+    state.latestMessageIDBySession[input.sessionID] = input.messageID;
     return;
   }
 
@@ -112,13 +138,57 @@ export function recordAssistantMessage(
     rebuildSessionTokenUsage(state, input.sessionID);
   }
 
+  // Always track latest message for per-message prompt-right metrics
+  state.latestMessageIDBySession[input.sessionID] = input.messageID;
+
   const timing = state.messageTimingByID[input.messageID];
-  if (timing?.sessionID === input.sessionID && typeof timing.firstResponseAt === "number") {
-    const totalTokens = (input.outputTokens ?? 0) + (input.reasoningTokens ?? 0);
-    const endAt = input.finish === "tool-calls" ? timing.lastToolCallAt : input.completedAt;
-    const durationMs = typeof endAt === "number" ? Math.max(endAt - timing.firstResponseAt, 1) : undefined;
-    const ttftMs = Math.max(timing.firstResponseAt - timing.requestStartAt, 0);
-    if (totalTokens > 0 && durationMs) {
+  const totalTokens = (input.outputTokens ?? 0) + (input.reasoningTokens ?? 0);
+
+  let durationMs: number | undefined;
+  let ttftMs: number | undefined;
+
+  if (timing?.sessionID === input.sessionID && typeof (timing.firstTokenAt ?? timing.firstResponseAt) === "number") {
+    const first = timing.firstTokenAt ?? timing.firstResponseAt!;
+    const endAt = input.finish === "tool-calls" ? (timing.lastToolCallAt ?? input.completedAt) : input.completedAt;
+    durationMs = typeof endAt === "number" ? Math.max(endAt - first, 1) : undefined;
+    ttftMs = Math.max(first - timing.requestStartAt, 0);
+  } else {
+    // Hydration or race: no timing, fallback to wall time
+    durationMs = Math.max(input.completedAt - input.createdAt, 1);
+    ttftMs = undefined;
+  }
+
+  if (totalTokens > 0 && durationMs) {
+    state.messageMetricsByID[input.messageID] = {
+      totalTokens,
+      durationMs,
+      ttftMs,
+      createdAt: input.createdAt,
+      completedAt: input.completedAt
+    };
+
+    // Keep sessionAverageByID for backward compat / sidebar analytics (weighted throughput)
+    if (ttftMs !== undefined) {
+      const firstForSession = timing?.firstTokenAt ?? timing?.firstResponseAt;
+      const endForSession = timing ? (input.finish === "tool-calls" ? (timing.lastToolCallAt ?? input.completedAt) : input.completedAt) : input.completedAt;
+      const sessionDuration = timing && firstForSession && typeof endForSession === "number" ? Math.max(endForSession - firstForSession, 1) : durationMs;
+      const sessionTtft = ttftMs;
+      const totals =
+        state.sessionAverageByID[input.sessionID] ??
+        {
+          totalTokens: 0,
+          totalDurationMs: 0,
+          totalTtftMs: 0,
+          messageCount: 0
+        };
+      state.sessionAverageByID[input.sessionID] = {
+        totalTokens: totals.totalTokens + totalTokens,
+        totalDurationMs: totals.totalDurationMs + sessionDuration,
+        totalTtftMs: totals.totalTtftMs + sessionTtft,
+        messageCount: totals.messageCount + 1
+      };
+    } else {
+      // Hydrated without TTFT: still count tokens/duration but not TTFT (do not dilute session TTFT average)
       const totals =
         state.sessionAverageByID[input.sessionID] ??
         {
@@ -130,13 +200,14 @@ export function recordAssistantMessage(
       state.sessionAverageByID[input.sessionID] = {
         totalTokens: totals.totalTokens + totalTokens,
         totalDurationMs: totals.totalDurationMs + durationMs,
-        totalTtftMs: totals.totalTtftMs + ttftMs,
-        messageCount: totals.messageCount + 1
+        totalTtftMs: totals.totalTtftMs,
+        messageCount: totals.messageCount
       };
     }
   }
 
   delete state.messageTimingByID[input.messageID];
+  delete state.streamSamplesByMessageID[input.messageID];
   pruneSamples(state, input.completedAt);
 }
 
@@ -148,10 +219,19 @@ export function recordAssistantDelta(
     at: input.at,
     tokens: estimateStreamTokens(input.delta)
   };
+  // Per-message samples (primary for live TPS current round)
+  state.streamSamplesByMessageID[input.messageID] = [
+    ...(state.streamSamplesByMessageID[input.messageID] ?? []).filter((item) => input.at - item.at <= STREAM_WINDOW_MS),
+    sample
+  ];
+  // Keep session copy for backward compat (deprecated)
   state.streamSamplesBySession[input.sessionID] = [
     ...(state.streamSamplesBySession[input.sessionID] ?? []).filter((item) => input.at - item.at <= STREAM_WINDOW_MS),
     sample
   ];
+
+  // Ensure latestMessageIDBySession tracks streaming message
+  state.latestMessageIDBySession[input.sessionID] = input.messageID;
 
   const timing = state.messageTimingByID[input.messageID];
   if (timing) {
@@ -167,6 +247,9 @@ export function recordAssistantDelta(
 }
 
 export function recordToolActivity(state: MetricsState, sessionID: string, messageID: string, at = Date.now()) {
+  if (state.streamSamplesByMessageID[messageID]?.length) {
+    delete state.streamSamplesByMessageID[messageID];
+  }
   if (state.streamSamplesBySession[sessionID]?.length) {
     delete state.streamSamplesBySession[sessionID];
   }
@@ -186,8 +269,10 @@ export function renderMetricsText(
   options: { now?: number; idle?: boolean } = {}
 ) {
   const live = liveTps(state, sessionID, options) ?? "-";
-  const avg = sessionAverage(state, sessionID) ?? "-";
-  const ttft = sessionTtft(state, sessionID) ?? "-";
+  const msgID = state.latestMessageIDBySession[sessionID];
+  const hasPerMessage = !!msgID && !!state.messageMetricsByID[msgID];
+  const avg = hasPerMessage ? (messageAverage(state, sessionID) ?? "-") : (sessionAverage(state, sessionID) ?? "-");
+  const ttft = hasPerMessage ? (messageTtft(state, sessionID) ?? "-") : (sessionTtft(state, sessionID) ?? "-");
   return `TPS ${live} | AVG ${avg} | TTFT ${ttft}`;
 }
 
@@ -214,10 +299,14 @@ export function renderPromptRightMetricsText(
   const usage = state.latestResponseUsageBySession[sessionID];
   const used = usage ? sumTokens(usage) : undefined;
   const cacheRate = usage ? cacheReadRate(usage) : undefined;
+  const msgID = state.latestMessageIDBySession[sessionID];
+  const hasPerMessage = !!msgID && !!state.messageMetricsByID[msgID];
+  const avgVal = hasPerMessage ? messageAverage(state, sessionID) : sessionAverage(state, sessionID);
+  const ttftVal = hasPerMessage ? messageTtft(state, sessionID) : sessionTtft(state, sessionID);
   const values: Record<PromptRightMetric, string> = {
     tps: `TPS ${liveTps(state, sessionID, options) ?? "-"}`,
-    avg: `AVG ${sessionAverage(state, sessionID) ?? "-"}`,
-    ttft: `TTFT ${sessionTtft(state, sessionID) ?? "-"}`,
+    avg: `AVG ${avgVal ?? "-"}`,
+    ttft: `TTFT ${ttftVal ?? "-"}`,
     used: `${used === undefined ? "-" : formatTokenCount(used)} used`,
     cache: `${cacheRate === undefined ? "-" : formatPercent(cacheRate)} cache`,
     input: `${usage?.inputTokens === undefined ? "-" : formatTokenCount(usage.inputTokens)} in`,
@@ -257,6 +346,11 @@ export function renderSessionTokenUsage(state: MetricsState, sessionID: string, 
 }
 
 function pruneSamples(state: MetricsState, now = Date.now()) {
+  for (const [messageID, samples] of Object.entries(state.streamSamplesByMessageID)) {
+    const next = samples.filter((sample) => now - sample.at <= STREAM_WINDOW_MS);
+    if (next.length > 0) state.streamSamplesByMessageID[messageID] = next;
+    else delete state.streamSamplesByMessageID[messageID];
+  }
   for (const [sessionID, samples] of Object.entries(state.streamSamplesBySession)) {
     const next = samples.filter((sample) => now - sample.at <= STREAM_WINDOW_MS);
     if (next.length > 0) state.streamSamplesBySession[sessionID] = next;
@@ -289,6 +383,22 @@ function rebuildSessionTokenUsage(state: MetricsState, sessionID: string) {
   state.sessionTokenUsageByID[sessionID] = usage;
 }
 
+function messageAverage(state: MetricsState, sessionID: string) {
+  const msgID = state.latestMessageIDBySession[sessionID];
+  if (!msgID) return undefined;
+  const m = state.messageMetricsByID[msgID];
+  if (!m || m.totalTokens <= 0 || m.durationMs <= 0) return undefined;
+  return formatRate(m.totalTokens / (m.durationMs / 1000), "AVG");
+}
+
+function messageTtft(state: MetricsState, sessionID: string) {
+  const msgID = state.latestMessageIDBySession[sessionID];
+  if (!msgID) return undefined;
+  const m = state.messageMetricsByID[msgID];
+  if (!m || m.ttftMs === undefined || m.ttftMs < 0) return undefined;
+  return formatTtft(m.ttftMs / 1000);
+}
+
 function sessionAverage(state: MetricsState, sessionID: string) {
   const totals = state.sessionAverageByID[sessionID];
   if (!totals || totals.totalTokens <= 0 || totals.totalDurationMs <= 0) return undefined;
@@ -308,7 +418,9 @@ function liveTps(
 ) {
   if (options.idle) return undefined;
   const now = options.now ?? Date.now();
-  const samples = state.streamSamplesBySession[sessionID] ?? [];
+  const msgID = state.latestMessageIDBySession[sessionID];
+  // Prefer per-message samples, fallback to session for backward compat during transition
+  const samples = (msgID ? state.streamSamplesByMessageID[msgID] : undefined) ?? state.streamSamplesBySession[sessionID] ?? [];
   const relevant = samples.filter((sample) => now - sample.at <= STREAM_WINDOW_MS);
   if (relevant.length === 0) return undefined;
   const lastSample = relevant.at(-1);
