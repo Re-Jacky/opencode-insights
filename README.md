@@ -4,13 +4,22 @@ Local OpenCode observability for live TPS, subagent status, and full-fidelity re
 
 ## Install
 
-Install globally with OpenCode's plugin manager:
+Add the combined server/TUI package to the OpenCode v2 `plugins` array in
+`opencode.json` or `opencode.jsonc`:
 
-```bash
-opencode plugin @rejacky/opencode-insights --global
+```jsonc
+{
+  "plugins": [
+    "@rejacky/opencode-insights"
+  ]
+}
 ```
 
 Restart OpenCode after installing the plugin.
+
+The package's `./tui` export is loaded automatically from the main plugin
+configuration. Do not add a second TUI entry. `cli.json` or `cli.jsonc` is
+reserved for CLI-only plugins and is not needed for Insights.
 
 On startup, the plugin creates a user-local `opencode-insights` command shim in:
 
@@ -26,11 +35,11 @@ opencode-insights doctor
 
 ## Update
 
-`opencode plugin` does not re-install or upgrade already-cached packages. To update to the latest version, clear the cached copy and reinstall:
+To update to the latest version, update the package entry in `opencode.json(c)`
+or remove the cached package before restarting OpenCode:
 
 ```bash
 rm -rf ~/.cache/opencode/packages/node_modules/@rejacky/opencode-insights
-opencode plugin @rejacky/opencode-insights --global
 ```
 
 Then restart OpenCode.
@@ -57,7 +66,9 @@ OpenCode Insights viewer listening at http://127.0.0.1:8765
 
 ## Uninstall
 
-Remove this plugin from `opencode.json` / `opencode.jsonc`, remove it from `tui.json`, and delete the local Insights database files:
+Remove this package from the `plugins` array in `opencode.json` / `opencode.jsonc`.
+The command also cleans stale entries from `cli.json(c)` and legacy `tui.json(c)`
+files, then deletes the local Insights database files:
 
 ```bash
 opencode-insights uninstall
@@ -81,7 +92,7 @@ Use a custom OpenCode config directory or data location:
 opencode-insights uninstall --config-dir ~/.config/opencode --data-dir ~/.opencode-insights
 ```
 
-After uninstalling, restart OpenCode. Packages installed with `opencode plugin ... --global` are stored under OpenCode's package cache. On macOS/Linux this is typically:
+After uninstalling, restart OpenCode. Packages cached by OpenCode are stored under its package cache. On macOS/Linux this is typically:
 
 ```text
 ~/.cache/opencode/packages
