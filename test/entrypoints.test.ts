@@ -43,6 +43,7 @@ describe("plugin entrypoints", () => {
     }));
     const claims: Array<{ append: string; render: (input: unknown) => unknown }> = [];
     const session = { id: "ses_root", title: "Main", time: { created: 1 }, model: { providerID: "opencode-go", modelID: "model" } };
+    const assistantTool = { type: "tool", id: "tool_1", name: "task", state: { status: "running", input: { description: "Child task", subagent_type: "general" }, metadata: { sessionId: "ses_child", parentSessionId: "ses_root" }, time: { created: 1_000 } } };
     const context = {
       options: { dataDir },
       theme: { text: "white", textMuted: "gray", error: "red" },
@@ -51,7 +52,7 @@ describe("plugin entrypoints", () => {
        listen: (handler: (event: { details: unknown }) => void) => { listenHandler = handler; return () => { unregistered += 1; }; },
         session: {
           list: () => [session], get: (id: string) => id === session.id ? session : undefined, status: () => "idle",
-          message: { list: () => [], get: () => undefined }
+          message: { list: () => [{ id: "msg_root", type: "assistant", time: { created: 900, completed: 1_500 }, tokens: { input: 1, output: 2, reasoning: 0, cache: { read: 0, write: 0 } }, content: [assistantTool] }], get: () => undefined }
         }
       },
       ui: {
@@ -80,10 +81,18 @@ describe("plugin entrypoints", () => {
         });
       }
       listenHandler?.({ details: { type: "session.created", id: "evt_created", created: 1_000, data: { sessionID: "ses_child", parentID: "ses_root", title: "Child", model: { providerID: "github-copilot", id: "model" } } } });
+      listenHandler?.({ details: { type: "session.text.delta", id: "evt_delta", created: 1_050, data: { sessionID: "ses_root", assistantMessageID: "msg_root", ordinal: 0, delta: "hello" } } });
       listenHandler?.({ details: { type: "session.tool.called", id: "evt_called", created: 1_100, data: { sessionID: "ses_root", assistantMessageID: "msg_root", id: "tool_1", input: {}, executed: false } } });
       listenHandler?.({ details: { type: "session.tool.failed", id: "evt_failed", created: 1_200, data: { sessionID: "ses_root", assistantMessageID: "msg_root", id: "tool_1", error: { type: "error", message: "failed" }, content: [], executed: true } } });
       listenHandler?.({ details: { type: "session.compaction.ended", id: "evt_compact", created: 1_300, data: { sessionID: "ses_root", reason: "auto", text: "summary", recent: "recent" } } });
       listenHandler?.({ details: { type: "session.step.ended", id: "evt_step", created: 1_400, data: { sessionID: "ses_root", assistantMessageID: "msg_root", finish: "stop", cost: 0, tokens: { input: 1, output: 2, reasoning: 0, cache: { read: 0, write: 0 } } } } });
+      const runtime = (cleanup as (() => Promise<void>) & { __insightsState?: { activity: { bySessionID: Record<string, { warnings: number; autoCompacts: number; steps: number }> }; subagents: { children: Record<string, unknown> }; metrics: { sessionTokenUsageByID: Record<string, { responseCount: number; outputTokens: number }> }; render: (sessionID: string) => string } }).__insightsState!;
+      expect(runtime.activity.bySessionID.ses_root).toMatchObject({ warnings: 1, autoCompacts: 1, steps: 1 });
+      expect(runtime.subagents.children.ses_child).toBeDefined();
+      expect(runtime.metrics.sessionTokenUsageByID.ses_root).toMatchObject({ responseCount: 1, outputTokens: 2 });
+      expect(runtime.render("ses_root")).toContain("1 warning");
+      expect(runtime.render("ses_root")).toContain("1 auto-compact");
+      expect(runtime.render("ses_root")).toContain("1 subagent");
       await new Promise((resolve) => setTimeout(resolve, 50));
     } finally {
       globalThis.fetch = originalFetch;
@@ -91,7 +100,10 @@ describe("plugin entrypoints", () => {
       rmSync(dataDir, { recursive: true, force: true });
     }
     expect(listenHandler).toBeDefined();
+    const beforeCleanup = JSON.stringify((cleanup as (() => Promise<void>) & { __insightsState: { activity: unknown } }).__insightsState.activity);
     await cleanup?.();
+    listenHandler?.({ details: { type: "session.compaction.ended", id: "after_cleanup", created: 2_000, data: { sessionID: "ses_root", reason: "auto", text: "late", recent: "late" } } });
+    expect(JSON.stringify((cleanup as (() => Promise<void>) & { __insightsState: { activity: unknown } }).__insightsState.activity)).toBe(beforeCleanup);
     expect(unregistered).toBe(3);
     expect(listeners.size).toBe(0);
     expect(listenHandler).toBeDefined();

@@ -172,6 +172,7 @@ const setup = async (context: Context) => {
     copilotTracker.record(session.id, providerIDFromModel(session.model));
   }
   cleanups.push(context.data.listen(({ details }) => {
+    if (disposed) return;
     const data: V2Data = isRecord(details.data) ? details.data : {};
     const eventType = details.type;
     const sessionID = stringValue(data.sessionID);
@@ -240,12 +241,21 @@ const setup = async (context: Context) => {
   cleanups.push(...slotCleanups);
   const timers = [setInterval(() => { metricListeners.notify(); activityListeners.notify(); goListeners.notify(); copilotListeners.notify(); }, 1000)];
   let disposed = false;
-  return async () => {
+  const cleanup = async () => {
     if (disposed) return;
     disposed = true;
     for (const timer of timers) clearInterval(timer);
     for (const cleanup of cleanups) cleanup();
   };
+  Object.assign(cleanup, {
+    __insightsState: {
+      metrics,
+      activity,
+      subagents,
+      render: (sessionID: string) => formatActivityBriefRows(treeActivity(activity, sessionID), treeSubagentCount(activity, sessionID)).join("\n")
+    }
+  });
+  return cleanup;
 };
 
 export { setup };

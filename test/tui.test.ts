@@ -37,7 +37,7 @@ describe("v2 TUI contract", () => {
     expect(source).toContain("context.ui.slot");
     expect(source).toContain("context.ui.router.navigate");
     expect(source).toContain("context.ui.dialog");
-    expect(source).toContain("return async () =>");
+    expect(source).toContain("const cleanup = async () =>");
     expect(source).not.toContain("@opencode-ai/plugin/tui");
     expect(source).not.toContain("api.slots.register");
     expect(source).not.toContain("api.route.navigate");
@@ -81,7 +81,7 @@ describe("v2 TUI contract", () => {
     const source = readFileSync(new URL("../src/tui.tsx", import.meta.url), "utf8");
     expect(source).toContain("const setup = async (context: Context)");
     expect(source).toContain("context.ui.slot");
-    expect(source).toContain("return async () =>");
+    expect(source).toContain("const cleanup = async () =>");
     expect(source).toContain("disposed");
     expect(source).toContain("context.ui.dialog.show");
   });
