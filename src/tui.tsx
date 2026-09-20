@@ -148,7 +148,8 @@ function Sidebar(props: { context: Context; sessionID: string; config: InsightsC
 
 function Subagents(props: { sessionID: string; state: SubagentState; context: Context; subscribe: (listener: () => void) => () => void }) {
   const [version, setVersion] = createSignal(0);
-  props.subscribe(() => setVersion((value) => value + 1));
+  const unsubscribe = props.subscribe(() => setVersion((value) => value + 1));
+  onCleanup(unsubscribe);
   const model = () => { version(); return getSubagentSidebarModel(props.state, props.sessionID); };
   return model() ? <TextSection theme={props.context.theme} title={model()!.title} lines={() => { const current = model(); return current ? [current.summary, ...current.rows.map((row) => `${row.title} ${row.subtitle}`)] : []; }} onClick={() => {
     const row = model()?.rows[0];

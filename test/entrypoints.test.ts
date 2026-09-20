@@ -88,50 +88,66 @@ describe("plugin entrypoints", () => {
       expect(runtime.render("ses_root")).toContain("1 subagent");
        await new Promise((resolve) => setTimeout(resolve, 50));
        let renderBoundary = "";
+       let mountedCounts: { metrics: number; activity: number; subagents: number; go: number; copilot: number } | undefined;
        try {
          const sidebar = claims.find((claim) => claim.append === "sidebar.content")!;
-         createRoot((dispose) => {
-           try { sidebar.render({ sessionID: "ses_root" }); } finally { dispose(); }
-         });
-         for (let index = 0; index < 3; index += 1) {
-           createRoot((dispose) => {
-             try { sidebar.render({ sessionID: "ses_root" }); } finally { dispose(); }
-           });
-         }
-       } catch (error) {
-        renderBoundary = String(error);
-      }
-      expect(renderBoundary).toContain("No renderer found");
-      const preCleanup = {
-        activity: JSON.stringify(runtime.activity),
-        metrics: JSON.stringify(runtime.metrics),
-        subagents: JSON.stringify(runtime.subagents),
-        renderBoundary
-      };
-      (cleanup as (() => Promise<void>) & { __insightsPreCleanup?: typeof preCleanup }).__insightsPreCleanup = preCleanup;
+         const listenerCounts = (cleanup as (() => Promise<void>) & { __insightsState: { listenerCounts: () => { metrics: number; activity: number; subagents: number; go: number; copilot: number } } }).__insightsState.listenerCounts;
+         for (let index = 0; index < 4; index += 1) {
+           let dispose!: () => void;
+           try {
+             createRoot((rootDispose) => {
+               dispose = rootDispose;
+               sidebar.render({ sessionID: "ses_root" });
+             });
+           } catch (error) {
+             renderBoundary = String(error);
+           }
+           const currentCounts = listenerCounts();
+           mountedCounts ??= currentCounts;
+            expect(currentCounts).toEqual({ metrics: 2, activity: 2, subagents: 2, go: 1, copilot: 1 });
+           expect(currentCounts).toEqual(mountedCounts);
+           dispose();
+           expect(listenerCounts()).toEqual({ metrics: 0, activity: 0, subagents: 0, go: 0, copilot: 0 });
+          }
+        } finally {
+          expect(renderBoundary).toContain("No renderer found");
+          const preCleanup = {
+            activity: JSON.stringify(runtime.activity),
+            metrics: JSON.stringify(runtime.metrics),
+            subagents: JSON.stringify(runtime.subagents),
+            renderBoundary,
+            listenerCounts: mountedCounts
+          };
+          (cleanup as (() => Promise<void>) & { __insightsPreCleanup?: typeof preCleanup }).__insightsPreCleanup = preCleanup;
+        }
     } finally {
       globalThis.fetch = originalFetch;
       rmSync(dataDir, { recursive: true, force: true });
     }
     expect(listenHandler).toBeDefined();
-    const preCleanup = (cleanup as (() => Promise<void>) & { __insightsPreCleanup: { activity: string; metrics: string; subagents: string; renderBoundary: string } }).__insightsPreCleanup;
+    const preCleanup = (cleanup as (() => Promise<void>) & { __insightsPreCleanup: { activity: string; metrics: string; subagents: string; renderBoundary: string; listenerCounts: { metrics: number; activity: number; subagents: number; go: number; copilot: number } } }).__insightsPreCleanup;
     await cleanup?.();
     listenHandler?.({ details: { type: "session.compaction.ended", id: "after_cleanup", created: 2_000, data: { sessionID: "ses_root", reason: "auto", text: "late", recent: "late" } } });
     const runtimeAfterCleanup = (cleanup as (() => Promise<void>) & { __insightsState: { activity: unknown; metrics: unknown; subagents: unknown } }).__insightsState;
     expect(JSON.stringify(runtimeAfterCleanup.activity)).toBe(preCleanup.activity);
     expect(JSON.stringify(runtimeAfterCleanup.metrics)).toBe(preCleanup.metrics);
     expect(JSON.stringify(runtimeAfterCleanup.subagents)).toBe(preCleanup.subagents);
+    expect((cleanup as (() => Promise<void>) & { __insightsState: { listenerCounts: () => { metrics: number; activity: number; subagents: number; go: number; copilot: number } } }).__insightsState.listenerCounts()).toEqual({ metrics: 0, activity: 0, subagents: 0, go: 0, copilot: 0 });
     let postCleanupBoundary = "";
     try {
-      claims.find((claim) => claim.append === "sidebar.content")?.render({ sessionID: "ses_root" });
+      createRoot((dispose) => {
+        try { claims.find((claim) => claim.append === "sidebar.content")?.render({ sessionID: "ses_root" }); }
+        finally { dispose(); }
+      });
     } catch (error) {
       postCleanupBoundary = String(error);
     }
-       expect(postCleanupBoundary).toBe(preCleanup.renderBoundary);
-       await cleanup?.();
-       expect(unregistered).toBe(3);
-       expect(listeners.size).toBe(0);
-       expect(listenHandler).toBeDefined();
+    expect(postCleanupBoundary).toBe(preCleanup.renderBoundary);
+    await cleanup?.();
+    expect((cleanup as (() => Promise<void>) & { __insightsState: { listenerCounts: () => { metrics: number; activity: number; subagents: number; go: number; copilot: number } } }).__insightsState.listenerCounts()).toEqual({ metrics: 0, activity: 0, subagents: 0, go: 0, copilot: 0 });
+    expect(unregistered).toBe(3);
+    expect(listeners.size).toBe(0);
+    expect(listenHandler).toBeDefined();
   });
 
   test("production entrypoints do not import v1 plugin contracts", () => {

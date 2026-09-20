@@ -32,3 +32,28 @@ Recorded after the fix-wave commit.
 
 - OpenTUI native rendering remains unavailable in this Node test environment; the lifecycle harness validates component ownership and observes the expected renderer boundary.
 - The approved migration spec and plan remain untracked working-tree artifacts and were not included in the fix-wave commit.
+
+## Final Review Fix
+
+- Retained the `Subagents` listener unsubscribe and registered it with Solid `onCleanup`.
+- Strengthened repeated Solid-owner slot renders to assert stable `metrics`, `activity`, `subagents`, `go`, and `copilot` listener counts, zero counts after each owner disposal, zero counts after plugin cleanup, and idempotent cleanup.
+
+## Final-Fix Verification
+
+```text
+npm test -- test/tui.test.ts test/entrypoints.test.ts test/plugin.test.ts
+Test Files  3 passed (3)
+Tests       20 passed (20)
+
+npm run typecheck
+tsc --noEmit
+
+npm run verify
+Test Files  14 passed (14)
+Tests       176 passed (176)
+ESM Build success
+DTS Build success
+
+git diff --check
+passed
+```
