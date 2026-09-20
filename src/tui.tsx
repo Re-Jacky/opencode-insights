@@ -126,13 +126,16 @@ function TokenUsage(props: { sessionID: string; metrics: MetricsState; subagents
   return <TextSection theme={props.theme} title={title} lines={lines} />;
 }
 
-function Usage(props: { title: string; lines: () => string[]; error?: () => string | undefined; theme: SemanticTheme }) {
-  return <TextSection theme={props.theme} title={props.title} lines={() => props.error?.() ? [props.error()!] : props.lines()} />;
-}
-
-function Sidebar(props: { context: Context; sessionID: string; config: InsightsConfig; metrics: MetricsState; activity: ActivityState; subagents: SubagentState; subscribe: (listener: () => void) => () => void; notify: () => void; hydrateMetrics: () => void; hydrateActivity: () => void; go: ReturnType<typeof createGoUsageRefresher>; goTracker: ReturnType<typeof createGoProviderTracker>; copilot: ReturnType<typeof createCopilotUsageRefresher>; copilotTracker: ReturnType<typeof createCopilotProviderTracker>; copilotToken: string }) {
+function Usage(props: { title: string; lines: () => string[]; error?: () => string | undefined; theme: SemanticTheme; subscribe: (listener: () => void) => () => void }) {
   const [version, setVersion] = createSignal(0);
   props.subscribe(() => setVersion((value) => value + 1));
+  return <TextSection theme={props.theme} title={props.title} lines={() => { version(); return props.error?.() ? [props.error()!] : props.lines(); }} />;
+}
+
+function Sidebar(props: { context: Context; sessionID: string; config: InsightsConfig; metrics: MetricsState; activity: ActivityState; subagents: SubagentState; subscribe: (listener: () => void) => () => void; usageSubscribe: (listener: () => void) => () => void; notify: () => void; hydrateMetrics: () => void; hydrateActivity: () => void; go: ReturnType<typeof createGoUsageRefresher>; goTracker: ReturnType<typeof createGoProviderTracker>; copilot: ReturnType<typeof createCopilotUsageRefresher>; copilotTracker: ReturnType<typeof createCopilotProviderTracker>; copilotToken: string }) {
+  const [version, setVersion] = createSignal(0);
+  props.subscribe(() => setVersion((value) => value + 1));
+  props.usageSubscribe(() => setVersion((value) => value + 1));
   const goVisible = () => { version(); return goUsageSectionVisible(props.config, props.goTracker.usesOpenCodeGo(props.sessionID)); };
   const copilotVisible = () => { version(); return copilotUsageSectionVisible(props.config, props.copilotToken, props.copilotTracker.usesCopilot(props.sessionID)); };
   createEffect(() => {
@@ -161,8 +164,8 @@ function Sidebar(props: { context: Context; sessionID: string; config: InsightsC
   return <box flexDirection="column">
     <SessionAnalysis context={props.context} sessionID={props.sessionID} activity={props.activity} subscribe={props.subscribe} hydrate={props.hydrateActivity} />
     <TokenUsage sessionID={props.sessionID} metrics={props.metrics} subagents={props.subagents} subscribe={props.subscribe} hydrate={hydrateMetrics} theme={props.context.theme} />
-    {goVisible() ? <Usage theme={props.context.theme} title="Go Usage" lines={() => { const rows = goUsageRows(props.go.state, Date.now()); return rows?.map(formatGoUsageRow) ?? []; }} error={() => props.go.state.error} /> : null}
-    {copilotVisible() ? <Usage theme={props.context.theme} title="Copilot" lines={() => { const row = props.copilot.state.data ? copilotUsageRow(props.copilot.state.data, Date.now()) : undefined; return row ? formatCopilotUsageRow(row).split("\n") : []; }} error={() => props.copilot.state.error} /> : null}
+    {goVisible() ? <Usage subscribe={props.usageSubscribe} theme={props.context.theme} title="Go Usage" lines={() => { const rows = goUsageRows(props.go.state, Date.now()); return rows?.map(formatGoUsageRow) ?? []; }} error={() => props.go.state.error} /> : null}
+    {copilotVisible() ? <Usage subscribe={props.usageSubscribe} theme={props.context.theme} title="Copilot" lines={() => { const row = props.copilot.state.data ? copilotUsageRow(props.copilot.state.data, Date.now()) : undefined; return row ? formatCopilotUsageRow(row).split("\n") : []; }} error={() => props.copilot.state.error} /> : null}
     <Subagents sessionID={props.sessionID} state={props.subagents} context={props.context} subscribe={props.subscribe} />
   </box>;
 }
@@ -263,7 +266,7 @@ const setup = async (context: Context) => {
   };
   const slotCleanups = [
     context.ui.slot({ append: "prompt.footer.status", render: (input: SlotMap["prompt.footer.status"]) => <PromptRight context={context} sessionID={() => input.sessionID ?? ""} metrics={metrics} config={config} subscribe={metricListeners.subscribe} /> }),
-    context.ui.slot({ append: "sidebar.content", render: (input: SlotMap["sidebar.content"]) => <Sidebar context={context} sessionID={input.sessionID} config={config} metrics={metrics} activity={activity} subagents={subagents} subscribe={subscribeSidebar} notify={() => { metricListeners.notify(); activityListeners.notify(); }} hydrateMetrics={() => {}} hydrateActivity={() => void hydrateActivity({ session: { list: () => context.data.session.list().map((session) => ({ id: session.id, ...(session.parentID ? { parentID: session.parentID } : {}), ...(session.title ? { title: session.title } : {}) })) }, message: { list: (sessionID: string) => context.data.session.message.list(sessionID).map((message) => ({ parts: message.type === "assistant" ? message.content.filter((part): part is Extract<typeof part, { type: "tool" }> => part.type === "tool").map((part) => ({ id: part.id, type: "tool", tool: part.name, state: part.state })) : [] })) } }, activity, input.sessionID).then(() => activityListeners.notify())} go={go} goTracker={goTracker} copilot={copilot} copilotTracker={copilotTracker} copilotToken={copilotToken} /> })
+    context.ui.slot({ append: "sidebar.content", render: (input: SlotMap["sidebar.content"]) => <Sidebar context={context} sessionID={input.sessionID} config={config} metrics={metrics} activity={activity} subagents={subagents} subscribe={subscribeSidebar} usageSubscribe={(listener) => { const goUnsubscribe = goListeners.subscribe(listener); const copilotUnsubscribe = copilotListeners.subscribe(listener); return () => { goUnsubscribe(); copilotUnsubscribe(); }; }} notify={() => { metricListeners.notify(); activityListeners.notify(); }} hydrateMetrics={() => {}} hydrateActivity={() => void hydrateActivity({ session: { list: () => context.data.session.list().map((session) => ({ id: session.id, ...(session.parentID ? { parentID: session.parentID } : {}), ...(session.title ? { title: session.title } : {}) })) }, message: { list: (sessionID: string) => context.data.session.message.list(sessionID).map((message) => ({ parts: message.type === "assistant" ? message.content.filter((part): part is Extract<typeof part, { type: "tool" }> => part.type === "tool").map((part) => ({ id: part.id, type: "tool", tool: part.name, state: part.state })) : [] })) } }, activity, input.sessionID).then(() => activityListeners.notify())} go={go} goTracker={goTracker} copilot={copilot} copilotTracker={copilotTracker} copilotToken={copilotToken} /> })
   ];
   cleanups.push(...slotCleanups);
   const timers = [setInterval(() => { metricListeners.notify(); activityListeners.notify(); goListeners.notify(); copilotListeners.notify(); }, 1000)];

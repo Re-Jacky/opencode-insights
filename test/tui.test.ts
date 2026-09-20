@@ -57,6 +57,8 @@ describe("v2 TUI contract", () => {
     expect(source).toContain("textFromToolContent");
     expect(source).toContain("go.refresh()");
     expect(source).toContain("copilot.refresh()");
+    expect(source).toContain("goListeners.subscribe");
+    expect(source).toContain("copilotListeners.subscribe");
     expect(source).toContain("createEffect");
   });
 

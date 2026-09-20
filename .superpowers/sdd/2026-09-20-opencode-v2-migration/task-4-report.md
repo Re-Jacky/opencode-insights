@@ -65,3 +65,18 @@
 ## Round 2 Commit
 
 Pending commit creation.
+
+## Round 3 Fix
+
+- Connected Go/Copilot refresh invalidation to dedicated reactive usage subscriptions. Usage sections now subscribe to `goListeners` and `copilotListeners`, read a local Solid signal in their render getter, and update after refresh data/errors/countdown changes.
+- Extended the build-backed setup harness to invoke both registered slot renderers, assert both renderer paths were exercised, dispatch representative v2 events, and retain idempotent cleanup assertions. Headless rendering correctly reports the expected `No renderer found` boundary.
+
+## Round 3 Verification
+
+- `npm test -- test/tui.test.ts test/activity-hydrate.test.ts test/entrypoints.test.ts`: PASS, 3 files, 21 tests.
+- `npm run typecheck`: PASS.
+- `npm run verify`: PASS, 14 test files, 187 tests; typecheck and ESM/declaration build passed.
+
+## Round 3 Commit
+
+Pending commit creation.

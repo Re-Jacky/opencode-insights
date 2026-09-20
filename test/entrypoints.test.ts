@@ -54,6 +54,16 @@ describe("plugin entrypoints", () => {
 
     const cleanup = await module.setup(context);
     expect(claims.map((claim) => claim.append)).toEqual(["prompt.footer.status", "sidebar.content"]);
+    let rendered = 0;
+    for (const claim of claims) {
+      try {
+        claim.render(claim.append === "sidebar.content" ? { sessionID: "ses_root" } : { sessionID: "ses_root", mode: "normal", showDetails: false });
+      } catch (error) {
+        expect(String(error)).toContain("No renderer found");
+      }
+      rendered += 1;
+    }
+    expect(rendered).toBe(2);
     listenHandler?.({ details: { type: "session.created", id: "evt", data: { sessionID: "ses_child", parentID: "ses_root", title: "Child", model: { providerID: "github-copilot", modelID: "model" } } } });
     listeners.get("session.status")?.({ type: "session.status", data: { sessionID: "ses_child", status: { type: "busy" } } });
     await cleanup?.();
