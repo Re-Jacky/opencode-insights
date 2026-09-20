@@ -136,6 +136,28 @@ describe("viewer conversation helpers", () => {
     }
   });
 
+  test("labels v2 prompt, context, and model request lifecycle stages", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "opencode-insights-viewer-"));
+    const dbPath = join(dir, "insights.sqlite");
+    try {
+      const prompt = JSON.stringify({ event: { sessionID: "ses_v2", messageID: "msg_v2", text: "hello" } });
+      const context = JSON.stringify({ event: { sessionID: "ses_v2", messageID: "msg_v2", system: ["system"] } });
+      const request = JSON.stringify({ event: { sessionID: "ses_v2", messageID: "msg_v2", model: { providerID: "openai", id: "gpt-5" } } });
+      await execFileAsync("sqlite3", [dbPath, `create table captures (id text primary key, kind text not null, timestamp integer not null, session_id text, message_id text, provider_id text, model_id text, event_type text, payload_json text not null);
+        insert into captures values ('p', 'prompt', 1000, 'ses_v2', 'msg_v2', null, null, null, '${prompt.replace(/'/g, "''")}');
+        insert into captures values ('c', 'context', 1010, 'ses_v2', 'msg_v2', null, null, null, '${context.replace(/'/g, "''")}');
+        insert into captures values ('m', 'model.request', 1020, 'ses_v2', 'msg_v2', 'openai', 'gpt-5', null, '${request.replace(/'/g, "''")}');`]);
+      const history = await readHistory({ dbPath, limit: 100 });
+      expect(history.requests.map((item) => item.purpose)).toEqual([
+        "Dispatch a provider model request for this message.",
+        "Prepare model context for this message."
+      ]);
+      expect(history.requests.map((item) => item.providerID)).toEqual(["openai", undefined]);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
   test("viewer history keeps older project metadata for recent sessions", async () => {
     const dir = await mkdtemp(join(tmpdir(), "opencode-insights-viewer-"));
     const dbPath = join(dir, "insights.sqlite");

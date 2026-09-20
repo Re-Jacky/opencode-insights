@@ -202,14 +202,13 @@ function viewerToolSteps(response: HistoryMessage["response"]) {
   const seen = new Set<string>();
   for (const wrapper of response?.events || []) {
     const event = isRecord(wrapper.event) ? wrapper.event : undefined;
-    const properties = isRecord(event?.properties) ? event.properties : undefined;
-    const part = isRecord(properties?.part) ? properties.part : undefined;
-    if (event?.type !== "message.part.updated" || part?.type !== "tool") continue;
-    const state = isRecord(part.state) ? part.state : undefined;
-    const key = [part.id, part.tool, state?.status].filter(Boolean).join(":");
+    const data = isRecord(event?.data) ? event.data : undefined;
+    if (!data || (event?.type !== "session.tool.success" && event?.type !== "session.tool.failed")) continue;
+    const status = event.type === "session.tool.failed" ? "error" : "completed";
+    const key = [data.id, status].filter(Boolean).join(":");
     if (seen.has(key)) continue;
     seen.add(key);
-    tools.push([part.tool || "tool", state?.status].filter(Boolean).join(" · "));
+    tools.push([typeof data.name === "string" ? data.name : "tool", status].join(" · "));
   }
   return tools;
 }

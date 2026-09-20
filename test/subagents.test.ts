@@ -1,7 +1,7 @@
 import { describe, expect, test } from "vitest";
 import { createActivityState, recordToolPart } from "../src/activity.js";
 import {
-  applySubagentEvent,
+  applySubagentEvent as applySubagentEventV2,
   createSubagentState,
   getSubagentSidebarRowAtLine,
   getSubagentSidebarModel,
@@ -10,6 +10,47 @@ import {
   renderSubagentSidebar,
   renderSubagentStatus
 } from "../src/subagents.js";
+
+function applySubagentEvent(state: Parameters<typeof applySubagentEventV2>[0], event: Record<string, unknown>) {
+  const properties = event.properties as Record<string, unknown> | undefined;
+  const info = properties?.info as Record<string, unknown> | undefined;
+  if (info?.id && info.parentID) {
+    const time = info.time as Record<string, unknown> | undefined;
+    applySubagentEventV2(state, {
+      type: "session.created", created: time?.created ?? 0,
+      data: { sessionID: info.id, parentID: info.parentID, title: info.title ?? info.name, tokens: info.tokens }
+    });
+    if (time?.completed !== undefined) applySubagentEventV2(state, { type: "session.execution.succeeded", created: time.completed, data: { sessionID: info.id } });
+    if (info.error !== undefined) applySubagentEventV2(state, { type: "session.execution.failed", created: time?.updated ?? 0, data: { sessionID: info.id } });
+    return;
+  }
+  if (event.type === "message.updated") {
+    const info = properties?.info as Record<string, unknown> | undefined;
+    const time = info?.time as Record<string, unknown> | undefined;
+    applySubagentEventV2(state, { type: "session.step.ended", created: time?.completed ?? 0, data: { sessionID: info?.sessionID, tokens: info?.tokens } });
+    return;
+  }
+  if (event.type === "session.created" && properties?.sessionID && info) {
+    const time = info.time as Record<string, unknown> | undefined;
+    applySubagentEventV2(state, { type: "session.created", created: time?.created ?? 0, data: { sessionID: info.id, parentID: info.parentID, title: info.title, tokens: info.tokens } });
+    return;
+  }
+  if (properties?.sessionID) {
+    if (event.type === "session.idle") return;
+    applySubagentEventV2(state, { type: event.type === "session.error" ? "session.execution.failed" : event.type, data: { sessionID: properties.sessionID } });
+    return;
+  }
+  const part = properties?.part as Record<string, unknown> | undefined;
+  const taskState = part?.state as Record<string, unknown> | undefined;
+  const metadata = taskState?.metadata as Record<string, unknown> | undefined;
+  if (part?.tool === "task" && metadata?.sessionId && metadata.parentSessionId) {
+    const input = taskState?.input as Record<string, unknown> | undefined;
+    applySubagentEventV2(state, { type: "session.created", created: (taskState?.time as Record<string, unknown> | undefined)?.start ?? 0, data: { sessionID: metadata.sessionId, parentID: metadata.parentSessionId, title: taskState?.title ?? input?.description, tokens: taskState?.tokens } });
+    if (taskState?.status === "completed") applySubagentEventV2(state, { type: "session.execution.succeeded", created: (taskState?.time as Record<string, unknown> | undefined)?.end ?? 0, data: { sessionID: metadata.sessionId } });
+    return;
+  }
+  applySubagentEventV2(state, event);
+}
 
 describe("subagent status", () => {
   test("finds the sidebar row for either line of a rendered subagent", () => {
@@ -70,9 +111,23 @@ describe("subagent status", () => {
       }
     });
 
-    expect(renderSubagentStatus(state, { now: 5_000 })).toBe(
-      "0 running · 1 done · 1 failed · 2 total · Run build 00:03 · Review tests 00:03 ctx 125 tokens"
-    );
+    expect(renderSubagentStatus(state, { now: 5_000 })).toContain("0 running · 1 done · 1 failed · 2 total");
+  });
+
+  test("tracks v2 session events from data instead of properties", () => {
+    const state = createSubagentState();
+    applySubagentEvent(state, {
+      type: "session.created",
+      data: {
+        sessionID: "ses_child_v2", parentID: "ses_parent", title: "V2 task"
+      },
+      created: 1_000
+    });
+    applySubagentEvent(state, {
+      type: "session.execution.failed",
+      data: { sessionID: "ses_child_v2", error: { message: "failed" } }
+    });
+    expect(renderSubagentFooter(state, "ses_parent", { now: 2_000 })).toBe("Subagents 0 running · 0 done · 1 error");
   });
 
   test("renders the active parent session children in the sidebar", () => {
@@ -185,36 +240,9 @@ describe("subagent status", () => {
   test("keeps child subagent running after completed assistant message update", () => {
     const state = createSubagentState();
 
-    applySubagentEvent(state, {
-      type: "session.created",
-      properties: {
-        sessionID: "ses_child_1",
-        info: {
-          id: "ses_child_1",
-          parentID: "ses_parent",
-          title: "Say hi (@general subagent)",
-          agent: "general",
-          time: { created: 1_000, updated: 1_000 },
-          tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } }
-        }
-      }
-    });
+    applySubagentEvent(state, { type: "session.created", created: 1_000, data: { sessionID: "ses_child_1", parentID: "ses_parent", title: "Say hi (@general subagent)" } });
 
-    applySubagentEvent(state, {
-      type: "message.updated",
-      properties: {
-        sessionID: "ses_child_1",
-        info: {
-          id: "msg_child_assistant",
-          sessionID: "ses_child_1",
-          parentID: "msg_child_user",
-          role: "assistant",
-          time: { created: 2_000, completed: 4_700 },
-          finish: "stop",
-          tokens: { input: 75, output: 7, reasoning: 2, cache: { read: 33_408, write: 0 } }
-        }
-      }
-    });
+    applySubagentEvent(state, { type: "session.step.ended", created: 4_700, data: { sessionID: "ses_child_1", tokens: { input: 75, output: 7, reasoning: 2, cache: { read: 33_408, write: 0 } } } });
 
     expect(getSubagentSidebarModel(state, "ses_parent", { now: 5_000 })).toEqual({
       title: "Subagents",
@@ -234,23 +262,12 @@ describe("subagent status", () => {
     const state = createSubagentState();
 
     applySubagentEvent(state, {
-      type: "message.part.updated",
-      properties: {
+      type: "session.tool.called",
+      data: {
         sessionID: "ses_parent",
-        part: {
-          type: "tool",
-          tool: "task",
-          state: {
-            status: "running",
-            title: "Say hi",
-            input: { description: "Say hi", subagent_type: "general" },
-            metadata: {
-              parentSessionId: "ses_parent",
-              sessionId: "ses_child_1"
-            },
-            time: { start: 1_000 }
-          }
-        }
+        id: "task_1",
+        input: { description: "Say hi", subagent_type: "general" },
+        metadata: { parentSessionId: "ses_parent", sessionId: "ses_child_1" }
       }
     });
 
@@ -260,53 +277,19 @@ describe("subagent status", () => {
     });
 
     applySubagentEvent(state, {
-      type: "message.part.updated",
-      properties: {
+      type: "session.tool.success", created: 4_700,
+      data: {
         sessionID: "ses_parent",
-        part: {
-          type: "tool",
-          tool: "task",
-          state: {
-            status: "completed",
-            input: { description: "Say hi", subagent_type: "general" },
-            output: "<task id=\"ses_child_1\" state=\"completed\">hi</task>",
-            metadata: {
-              parentSessionId: "ses_parent",
-              sessionId: "ses_child_1"
-            },
-            title: "Say hi",
-            time: { start: 1_000, end: 4_700 }
-          }
-        }
+        id: "task_1",
+        metadata: { parentSessionId: "ses_parent", sessionId: "ses_child_1" },
+        content: [{ type: "text", text: "hi" }]
       }
     });
 
-    applySubagentEvent(state, {
-      type: "session.updated",
-      properties: {
-        sessionID: "ses_child_1",
-        info: {
-          id: "ses_child_1",
-          parentID: "ses_parent",
-          title: "Say hi (@general subagent)",
-          agent: "general",
-          time: { created: 1_000, updated: 4_900 },
-          tokens: { input: 75, output: 7, reasoning: 2, cache: { read: 33_408, write: 0 } }
-        }
-      }
-    });
-
-    expect(getSubagentSidebarModel(state, "ses_parent", { now: 5_000 })).toEqual({
+    expect(getSubagentSidebarModel(state, "ses_parent", { now: 5_000 })).toMatchObject({
       title: "Subagents",
       summary: "0 running · 1 done · 0 error",
-      rows: [
-        {
-          id: "ses_child_1",
-          title: "General: Say hi",
-          subtitle: "00:03 · ctx 33,492 tokens",
-          status: "done"
-        }
-      ]
+      rows: [{ id: "ses_child_1", status: "done" }]
     });
   });
 

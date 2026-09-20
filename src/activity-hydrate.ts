@@ -57,15 +57,25 @@ function applyParts(state: ActivityState, sessionID: string, parts: Array<Record
         ...(id !== undefined ? { id } : {}),
         tool: part.tool,
         ...(typeof part.state === "object" && part.state !== null && !Array.isArray(part.state)
-          ? { state: part.state as { status?: string; input?: { name?: string }; error?: string } }
+          ? { state: normalizeToolState(part.state as Record<string, unknown>) }
           : {})
       });
     } else if (type === "compaction" && id !== undefined) {
-      recordCompaction(state, sessionID, id, part.auto === true);
-    } else if (type === "step-finish" && id !== undefined) {
+      recordCompaction(state, sessionID, id, part.reason === "auto");
+    } else if (type === "step" && id !== undefined) {
       recordStep(state, sessionID, id);
     }
   }
+}
+
+function normalizeToolState(state: Record<string, unknown>) {
+  const error = typeof state.error === "object" && state.error !== null && !Array.isArray(state.error)
+    ? (state.error as Record<string, unknown>).message
+    : state.error;
+  return {
+    ...state,
+    ...(typeof error === "string" ? { error } : {})
+  } as { status?: string; input?: { name?: string }; error?: string };
 }
 
 export async function hydrateActivity(client: ActivityClient, state: ActivityState, rootSessionID: string): Promise<void> {

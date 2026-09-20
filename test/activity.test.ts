@@ -135,6 +135,19 @@ describe("activity state", () => {
     recordToolPart(state, "ses_a", { tool: "bash" });
     expect(state.bySessionID["ses_a"]?.toolCalls).toBe(2);
   });
+
+  test("counts v2 tool, compaction, and step events with the same live/hydrated keys", () => {
+    const state = createActivityState();
+    recordToolPart(state, "ses_a", {
+      id: "tool_1",
+      tool: "bash",
+      state: { status: "error", input: {}, error: "exit 1" }
+    });
+    recordCompaction(state, "ses_a", "event_compact", true);
+    recordStep(state, "ses_a", "event_step");
+
+    expect(state.bySessionID["ses_a"]).toMatchObject({ toolCalls: 1, warnings: 1, autoCompacts: 1, steps: 1 });
+  });
 });
 
 describe("activity merge and tree", () => {

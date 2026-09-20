@@ -41,13 +41,8 @@ export type SubagentSidebarModel = {
 
 type EventLike = {
   type?: unknown;
-  properties?: {
-    info?: Record<string, unknown>;
-    part?: unknown;
-    sessionID?: unknown;
-    sessionId?: unknown;
-    status?: unknown;
-  };
+  created?: unknown;
+  data?: Record<string, unknown>;
 };
 
 export function createSubagentState(activityStore?: ActivityState): SubagentState {
@@ -79,8 +74,8 @@ export function applySubagentEvent(state: SubagentState, event: unknown) {
   const previous = state.children[created.id];
   const preserveTerminal = !!previous && isTerminalStatus(previous.status) && created.status === "running";
   const status = preserveTerminal ? previous.status : created.status;
-  const title = preserveTerminal ? previous.title : created.title;
-  const startedAt = preserveTerminal ? previous.startedAt : created.startedAt;
+  const title = preserveTerminal || (previous && created.title === "task") ? previous.title : created.title;
+  const startedAt = previous ? previous.startedAt : created.startedAt;
   const endedAt = preserveTerminal ? previous.endedAt : created.endedAt;
   const next: SubagentInfo = {
     ...previous,
@@ -88,7 +83,7 @@ export function applySubagentEvent(state: SubagentState, event: unknown) {
     title,
     status,
     startedAt,
-    updatedAt: created.updatedAt,
+    updatedAt: created.status === "running" ? created.updatedAt : previous?.updatedAt ?? created.updatedAt,
     endedAt,
     elapsedMs: elapsedMs(startedAt, endedAt ?? created.updatedAt),
     tokens: created.tokens ?? previous?.tokens,
@@ -214,17 +209,28 @@ export function renderSubagentFooter(state: SubagentState, parentID: string, opt
 function extractTaskToolSubagent(event: unknown): SubagentInfo | undefined {
   if (!isRecord(event)) return undefined;
   const evt = event as EventLike;
-  if (evt.type !== "message.part.updated") return undefined;
+  if (evt.type !== "message.part.updated" && evt.type !== "session.tool.called" && evt.type !== "session.tool.success" && evt.type !== "session.tool.failed") return undefined;
 
-  const part = isRecord(evt.properties?.part) ? evt.properties.part : undefined;
-  if (!part || part.type !== "tool" || part.tool !== "task") return undefined;
+  const part = isRecord(evt.data?.part) ? evt.data.part : undefined;
+  const v2Task = evt.type === "session.tool.called" && evt.data ? {
+    type: "tool",
+    tool: "task",
+    state: { status: "running", input: evt.data.input, metadata: evt.data.metadata }
+  } : undefined;
+  const v2Result = (evt.type === "session.tool.success" || evt.type === "session.tool.failed") && evt.data ? {
+    type: "tool",
+    tool: "task",
+    state: { status: evt.type === "session.tool.failed" ? "error" : "completed", metadata: evt.data.metadata, output: evt.data.content }
+  } : undefined;
+  const task = part ?? v2Task ?? v2Result;
+  if (!task || task.type !== "tool" || task.tool !== "task") return undefined;
 
-  const state = isRecord(part.state) ? part.state : undefined;
+  const state = isRecord(task.state) ? task.state : undefined;
   if (!state) return undefined;
 
-  const metadata = isRecord(state.metadata) ? state.metadata : isRecord(part.metadata) ? part.metadata : undefined;
+  const metadata = isRecord(state.metadata) ? state.metadata : undefined;
   const id = asString(metadata?.sessionId) ?? sessionIdFromTaskOutput(asString(state.output));
-  const parentID = asString(metadata?.parentSessionId) ?? asString(evt.properties?.sessionID);
+  const parentID = asString(metadata?.parentSessionId) ?? asString(evt.data?.sessionID);
   if (!id || !parentID || id === parentID) return undefined;
 
   const status = taskToolStatus(state);
@@ -270,78 +276,63 @@ function agentTitle(agent: string) {
 function extractSubagent(event: unknown): SubagentInfo | undefined {
   if (!isRecord(event)) return undefined;
   const evt = event as EventLike;
-  if (evt.type !== "session.created" && evt.type !== "session.updated") return undefined;
+  if (evt.type !== "session.created") return undefined;
 
-  const info = isRecord(evt.properties?.info) ? evt.properties.info : undefined;
-  if (!info) return undefined;
+  const data = evt.data;
+  if (!data) return undefined;
 
-  const parentID = asString(info.parentID);
-  const id = asString(info.id);
+  const parentID = asString(data.parentID);
+  const id = asString(data.sessionID);
   if (!parentID || !id || id === parentID) return undefined;
 
-  const startedMs = numberFromPath(info.time, "created") ?? numberFromPath(info.time, "started") ?? Date.now();
-  const completedMs = numberFromPath(info.time, "completed");
-  const explicitUpdatedMs = numberFromPath(info.time, "updated");
+  const startedMs = asNumber(evt.created) ?? Date.now();
+  const completedMs = undefined;
+  const explicitUpdatedMs = startedMs;
   const updatedMs = completedMs ?? explicitUpdatedMs ?? startedMs;
-  const hasError = info.error !== undefined || asString(info.status) === "error";
-  const status: SubagentStatus =
-    hasError
-      ? "error"
-      : typeof completedMs === "number"
-        ? "done"
-        : "running";
-  const terminalMs =
-    typeof completedMs === "number"
-      ? updatedMs
-      : status === "error" && typeof explicitUpdatedMs === "number"
-        ? explicitUpdatedMs
-        : undefined;
+  const status: SubagentStatus = "running";
+  const terminalMs = typeof completedMs === "number" ? updatedMs : undefined;
   const endedAt = typeof terminalMs === "number" ? new Date(terminalMs).toISOString() : undefined;
 
   return {
     id,
     parentID,
-    title: asString(info.title) ?? asString(info.name) ?? "subagent",
+    title: asString(data.title) ?? "subagent",
     status,
     startedAt: new Date(startedMs).toISOString(),
     updatedAt: new Date(updatedMs).toISOString(),
     endedAt,
     elapsedMs: Math.max(0, updatedMs - startedMs),
-    tokens: extractTokens(info.tokens)
+    tokens: extractTokens(data.tokens)
   };
 }
 
 function updateExistingSubagent(state: SubagentState, event: unknown): SubagentInfo | undefined {
   if (!isRecord(event)) return undefined;
   const evt = event as EventLike;
-  const sessionID = asString(evt.properties?.sessionID) ?? asString(evt.properties?.sessionId);
+  const eventMetadata = isRecord(evt.data?.metadata) ? evt.data.metadata : undefined;
+  const sessionID = asString(eventMetadata?.sessionId) ?? asString(evt.data?.sessionID);
   if (!sessionID) return undefined;
 
   const previous = state.children[sessionID];
   if (!previous) return undefined;
 
-  const info = isRecord(evt.properties?.info) ? evt.properties.info : undefined;
   const status = statusFromEvent(event) ?? previous.status;
-  const timestamp = new Date().toISOString();
+  const timestamp = typeof evt.created === "number" ? new Date(evt.created).toISOString() : new Date().toISOString();
   const done = status === "done" || status === "error";
   return {
     ...previous,
     status,
     updatedAt: timestamp,
     endedAt: done ? previous.endedAt ?? timestamp : previous.endedAt,
-    tokens: extractTokens(info?.tokens) ?? previous.tokens
+    tokens: extractTokens(evt.data?.tokens) ?? previous.tokens
   };
 }
 
 function statusFromEvent(event: unknown): SubagentStatus | undefined {
   if (!isRecord(event)) return undefined;
   const evt = event as EventLike;
-  if (evt.type === "session.error") return "error";
-  if (evt.type === "session.status" && isRecord(evt.properties?.status)) {
-    const statusType = asString(evt.properties.status.type);
-    if (statusType === "busy" || statusType === "running") return "running";
-    if (statusType === "error") return "error";
-  }
+  if (evt.type === "session.execution.failed" || evt.type === "session.execution.interrupted" || evt.type === "session.tool.failed") return "error";
+  if (evt.type === "session.execution.succeeded" || evt.type === "session.tool.success") return "done";
   return undefined;
 }
 
