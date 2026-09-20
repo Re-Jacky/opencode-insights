@@ -80,3 +80,19 @@ Pending commit creation.
 ## Round 3 Commit
 
 Pending commit creation.
+
+## Round 4 Fix
+
+- Usage refresh completion now notifies both dedicated Go/Copilot listener registries immediately through the sidebar refresh path, rather than waiting for the one-second timer.
+- Usage components register their refresh subscriptions with `onCleanup`, preventing repeated slot renderer/component creation from accumulating listeners.
+- Preserved the build-backed renderer invocation and lifecycle assertions while extending source coverage for direct notifier calls and Solid cleanup.
+
+## Round 4 Verification
+
+- `npm test -- test/tui.test.ts test/activity-hydrate.test.ts test/entrypoints.test.ts`: PASS, 3 files, 21 tests.
+- `npm run typecheck`: PASS.
+- `npm run verify`: PASS, 14 test files, 187 tests; typecheck and ESM/declaration build passed.
+
+## Round 4 Commit
+
+Pending commit creation.

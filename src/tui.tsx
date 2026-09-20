@@ -1,7 +1,7 @@
 /** @jsxImportSource @opentui/solid */
 import { Plugin } from "@opencode/plugin/tui";
 import type { Context, SlotMap } from "@opencode/plugin/tui/context";
-import { createEffect, createSignal, For } from "solid-js";
+import { createEffect, createSignal, For, onCleanup } from "solid-js";
 import { readInsightsConfig, resolveCopilotToken, type InsightsConfig } from "./capture.js";
 import { createListenerRegistry } from "./listeners.js";
 import { createMetricsState, recordAssistantDelta, recordAssistantMessage, recordToolActivity, renderPromptRightMetricsText, renderSessionTokenUsage, type MetricsState } from "./metrics.js";
@@ -128,7 +128,8 @@ function TokenUsage(props: { sessionID: string; metrics: MetricsState; subagents
 
 function Usage(props: { title: string; lines: () => string[]; error?: () => string | undefined; theme: SemanticTheme; subscribe: (listener: () => void) => () => void }) {
   const [version, setVersion] = createSignal(0);
-  props.subscribe(() => setVersion((value) => value + 1));
+  const unsubscribe = props.subscribe(() => setVersion((value) => value + 1));
+  onCleanup(unsubscribe);
   return <TextSection theme={props.theme} title={props.title} lines={() => { version(); return props.error?.() ? [props.error()!] : props.lines(); }} />;
 }
 
@@ -266,7 +267,7 @@ const setup = async (context: Context) => {
   };
   const slotCleanups = [
     context.ui.slot({ append: "prompt.footer.status", render: (input: SlotMap["prompt.footer.status"]) => <PromptRight context={context} sessionID={() => input.sessionID ?? ""} metrics={metrics} config={config} subscribe={metricListeners.subscribe} /> }),
-    context.ui.slot({ append: "sidebar.content", render: (input: SlotMap["sidebar.content"]) => <Sidebar context={context} sessionID={input.sessionID} config={config} metrics={metrics} activity={activity} subagents={subagents} subscribe={subscribeSidebar} usageSubscribe={(listener) => { const goUnsubscribe = goListeners.subscribe(listener); const copilotUnsubscribe = copilotListeners.subscribe(listener); return () => { goUnsubscribe(); copilotUnsubscribe(); }; }} notify={() => { metricListeners.notify(); activityListeners.notify(); }} hydrateMetrics={() => {}} hydrateActivity={() => void hydrateActivity({ session: { list: () => context.data.session.list().map((session) => ({ id: session.id, ...(session.parentID ? { parentID: session.parentID } : {}), ...(session.title ? { title: session.title } : {}) })) }, message: { list: (sessionID: string) => context.data.session.message.list(sessionID).map((message) => ({ parts: message.type === "assistant" ? message.content.filter((part): part is Extract<typeof part, { type: "tool" }> => part.type === "tool").map((part) => ({ id: part.id, type: "tool", tool: part.name, state: part.state })) : [] })) } }, activity, input.sessionID).then(() => activityListeners.notify())} go={go} goTracker={goTracker} copilot={copilot} copilotTracker={copilotTracker} copilotToken={copilotToken} /> })
+    context.ui.slot({ append: "sidebar.content", render: (input: SlotMap["sidebar.content"]) => <Sidebar context={context} sessionID={input.sessionID} config={config} metrics={metrics} activity={activity} subagents={subagents} subscribe={subscribeSidebar} usageSubscribe={(listener) => { const goUnsubscribe = goListeners.subscribe(listener); const copilotUnsubscribe = copilotListeners.subscribe(listener); return () => { goUnsubscribe(); copilotUnsubscribe(); }; }} notify={() => { metricListeners.notify(); activityListeners.notify(); goListeners.notify(); copilotListeners.notify(); }} hydrateMetrics={() => {}} hydrateActivity={() => void hydrateActivity({ session: { list: () => context.data.session.list().map((session) => ({ id: session.id, ...(session.parentID ? { parentID: session.parentID } : {}), ...(session.title ? { title: session.title } : {}) })) }, message: { list: (sessionID: string) => context.data.session.message.list(sessionID).map((message) => ({ parts: message.type === "assistant" ? message.content.filter((part): part is Extract<typeof part, { type: "tool" }> => part.type === "tool").map((part) => ({ id: part.id, type: "tool", tool: part.name, state: part.state })) : [] })) } }, activity, input.sessionID).then(() => activityListeners.notify())} go={go} goTracker={goTracker} copilot={copilot} copilotTracker={copilotTracker} copilotToken={copilotToken} /> })
   ];
   cleanups.push(...slotCleanups);
   const timers = [setInterval(() => { metricListeners.notify(); activityListeners.notify(); goListeners.notify(); copilotListeners.notify(); }, 1000)];

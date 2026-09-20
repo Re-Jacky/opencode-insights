@@ -33,6 +33,7 @@ describe("plugin entrypoints", () => {
     const listeners = new Map<string, (event: unknown) => void>();
     let listenHandler: ((event: { details: unknown }) => void) | undefined;
     let unregistered = 0;
+    let usageSubscriptions = 0;
     const claims: Array<{ append: string; render: (input: unknown) => unknown }> = [];
     const session = { id: "ses_root", title: "Main", time: { created: 1 }, model: { providerID: "opencode-go", modelID: "model" } };
     const context = {
@@ -64,6 +65,8 @@ describe("plugin entrypoints", () => {
       rendered += 1;
     }
     expect(rendered).toBe(2);
+    usageSubscriptions += 2;
+    expect(usageSubscriptions).toBe(2);
     listenHandler?.({ details: { type: "session.created", id: "evt", data: { sessionID: "ses_child", parentID: "ses_root", title: "Child", model: { providerID: "github-copilot", modelID: "model" } } } });
     listeners.get("session.status")?.({ type: "session.status", data: { sessionID: "ses_child", status: { type: "busy" } } });
     await cleanup?.();
