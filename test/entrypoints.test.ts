@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readdirSync, readFileSync as readSourceFile, rmSync, writeFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -127,11 +127,24 @@ describe("plugin entrypoints", () => {
   });
 
   test("production entrypoints do not import v1 plugin contracts", () => {
-    const rootSource = readFileSync(new URL("../src/index.ts", import.meta.url), "utf8");
-    const tuiSource = readFileSync(new URL("../src/tui.tsx", import.meta.url), "utf8");
+    const sourceFiles = readdirSync(new URL("../src/", import.meta.url))
+      .filter((file) => /\.(?:ts|tsx)$/u.test(file))
+      .map((file) => readSourceFile(new URL(`../src/${file}`, import.meta.url), "utf8"))
+      .join("\n");
+    const forbidden = [
+      "@opencode-ai/plugin",
+      "api.slots.register",
+      "api.route.navigate",
+      "api.lifecycle.onDispose",
+      /\bconfig\.plugin\b/u,
+      /(?:chat\.message|chat\.params|chat\.headers|experimental\.chat)/u,
+      "tui.json",
+      "Legacy TUI"
+    ];
 
-    expect(rootSource).not.toContain("@opencode-ai/plugin");
-    expect(tuiSource).not.toContain("@opencode-ai/plugin");
+    for (const pattern of forbidden) {
+      expect(sourceFiles).not.toMatch(typeof pattern === "string" ? new RegExp(pattern.replaceAll(".", "\\."), "u") : pattern);
+    }
   });
 
 });

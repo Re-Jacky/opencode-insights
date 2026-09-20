@@ -1,16 +1,13 @@
 import { describe, expect, test } from "vitest";
 import {
-  addUniquePlugin,
   configureOpenCodeDebug,
   formatSessionSummary,
   parseOptions,
-  removePlugin,
   revertOpenCodeDebug,
   setSinglePluginSpec,
   stripJsonCommentsAndTrailingCommas,
   summarizeSessions,
   uninstallOpenCode,
-  unsupportedFlagWarning
 } from "../src/cli.js";
 import type { HistorySession } from "../src/inspect.js";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
@@ -28,27 +25,6 @@ const options = (configDir: string, extra: Record<string, unknown> = {}) => ({
 });
 
 describe("CLI v2 configuration", () => {
-  test("uses plugins for unique string entries", () => {
-    const config: Record<string, unknown> = { plugins: ["existing"] };
-    expect(addUniquePlugin(config, "next")).toBe(true);
-    expect(addUniquePlugin(config, "next")).toBe(false);
-    expect(config.plugins).toEqual(["existing", "next"]);
-    expect(config.plugin).toBeUndefined();
-  });
-
-  test("removes string and v2 object entries", () => {
-    const config: Record<string, unknown> = {
-      plugins: [
-        "existing",
-        "@rejacky/opencode-insights",
-        { package: "@rejacky/opencode-insights", options: { dbPath: "/tmp/db.sqlite" } }
-      ]
-    };
-    expect(removePlugin(config, "@rejacky/opencode-insights")).toBe(true);
-    expect(config.plugins).toEqual(["existing"]);
-    expect(removePlugin(config, "@rejacky/opencode-insights")).toBe(false);
-  });
-
   test("removes every recognized Insights package form without unrelated plugins", async () => {
     const dir = await mkdtemp(join(tmpdir(), "opencode-insights-test-"));
     try {
@@ -69,15 +45,14 @@ describe("CLI v2 configuration", () => {
       );
       await uninstallOpenCode(options(dir));
       const config = JSON.parse(await readFile(join(dir, "opencode.json"), "utf8")) as { plugins: unknown[] };
-      expect(config.plugins).toEqual(["keep", { package: "other-plugin", options: {} }]);
+      expect(config.plugins).toEqual(["keep", { package: "@rejacky/opencode-insights/tui", options: { enabled: true } }, { package: "other-plugin", options: {} }]);
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
   });
 
-  test("replaces existing Insights entries without mutating v1 plugin", () => {
+  test("replaces existing Insights entries without mutating unrelated config", () => {
     const config: Record<string, unknown> = {
-      plugin: ["legacy"],
       plugins: [
         "existing",
         "@rejacky/opencode-insights@latest",
@@ -85,20 +60,18 @@ describe("CLI v2 configuration", () => {
       ]
     };
     setSinglePluginSpec(config, { package: "/tmp/dist/index.js", options: { debug: true } });
-    expect(config.plugin).toEqual(["legacy"]);
     expect(config.plugins).toEqual(["existing", { package: "/tmp/dist/index.js", options: { debug: true } }]);
   });
 
-  test("keeps JSONC comments and does not treat v1 plugin as supported", async () => {
+  test("keeps JSONC comments while removing the v2 plugin", async () => {
     const dir = await mkdtemp(join(tmpdir(), "opencode-insights-test-"));
     try {
-      const source = '{\n  // Preserve this comment.\n  "plugin": ["legacy"],\n  "plugins": ["@rejacky/opencode-insights"]\n}\n';
+      const source = '{\n  // Preserve this comment.\n  "plugins": ["@rejacky/opencode-insights"]\n}\n';
       await writeFile(join(dir, "opencode.jsonc"), source, "utf8");
       await uninstallOpenCode(options(dir));
       const text = await readFile(join(dir, "opencode.jsonc"), "utf8");
       expect(text).toContain("Preserve this comment");
-      const config = JSON.parse(stripJsonCommentsAndTrailingCommas(text)) as { plugin: string[]; plugins: unknown[] };
-      expect(config.plugin).toEqual(["legacy"]);
+      const config = JSON.parse(stripJsonCommentsAndTrailingCommas(text)) as { plugins: unknown[] };
       expect(config.plugins).toEqual([]);
     } finally {
       await rm(dir, { recursive: true, force: true });
@@ -133,55 +106,27 @@ describe("CLI v2 configuration", () => {
     }
   });
 
-  test("uninstall removes the package from main, CLI, and legacy TUI configs", async () => {
+  test("uninstall removes the package from the main config only", async () => {
     const dir = await mkdtemp(join(tmpdir(), "opencode-insights-test-"));
     try {
       await writeFile(join(dir, "opencode.json"), '{"plugins": ["existing", {"package": "@rejacky/opencode-insights", "options": {}}]}\n', "utf8");
-      await writeFile(join(dir, "cli.jsonc"), '{\n  // CLI comment\n  "plugins": ["@rejacky/opencode-insights", "other-cli"]\n}\n', "utf8");
-      await writeFile(join(dir, "tui.json"), '{"plugins": ["@rejacky/opencode-insights/tui", "other-tui"]}\n', "utf8");
       const output = await uninstallOpenCode(options(dir));
       const main = JSON.parse(await readFile(join(dir, "opencode.json"), "utf8")) as { plugins: unknown[] };
-      const cliText = await readFile(join(dir, "cli.jsonc"), "utf8");
-      const cli = JSON.parse(stripJsonCommentsAndTrailingCommas(cliText)) as { plugins: unknown[] };
-      const tui = JSON.parse(await readFile(join(dir, "tui.json"), "utf8")) as { plugins: unknown[] };
       expect(output).toContain("Uninstall cleanup complete");
       expect(main.plugins).toEqual(["existing"]);
-      expect(cli.plugins).toEqual(["other-cli"]);
-      expect(tui.plugins).toEqual(["other-tui"]);
-      expect(cliText).toContain("CLI comment");
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
   });
 
-  test("revert changes local build entries in main config and CLI cleanup config", async () => {
+  test("revert changes local build entries in main config", async () => {
     const dir = await mkdtemp(join(tmpdir(), "opencode-insights-test-"));
     try {
       await writeFile(join(dir, "opencode.jsonc"), '{\n  // Main comment\n  "plugins": ["existing", "/Users/me/opencode-insights/dist/index.js"]\n}\n', "utf8");
-      await writeFile(join(dir, "cli.json"), '{"plugins": ["/Users/me/opencode-insights/dist/tui.js"]}\n', "utf8");
       const output = await revertOpenCodeDebug(options(dir, { keepData: false }));
       const main = JSON.parse(stripJsonCommentsAndTrailingCommas(await readFile(join(dir, "opencode.jsonc"), "utf8"))) as { plugins: unknown[] };
-      const cli = JSON.parse(await readFile(join(dir, "cli.json"), "utf8")) as { plugins: unknown[] };
       expect(output).toContain("Reverted to the official package");
       expect(main.plugins).toEqual(["existing", "@rejacky/opencode-insights@latest"]);
-      expect(cli.plugins).toEqual([]);
-    } finally {
-      await rm(dir, { recursive: true, force: true });
-    }
-  });
-
-  test("revert reports cleanup when only CLI stale entries are removed", async () => {
-    const dir = await mkdtemp(join(tmpdir(), "opencode-insights-test-"));
-    try {
-      await writeFile(join(dir, "opencode.json"), '{"plugins": ["existing"]}\n', "utf8");
-      await writeFile(join(dir, "cli.json"), '{"plugins": ["@rejacky/opencode-insights@0.4.1", "other-cli"]}\n', "utf8");
-
-      const output = await revertOpenCodeDebug(options(dir));
-
-      expect(output).toContain("Reverted to the official package");
-      expect(output).toContain("CLI plugin: removed stale Insights entries");
-      const cli = JSON.parse(await readFile(join(dir, "cli.json"), "utf8")) as { plugins: unknown[] };
-      expect(cli.plugins).toEqual(["other-cli"]);
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
@@ -205,8 +150,6 @@ describe("CLI v2 configuration", () => {
       const output = await revertOpenCodeDebug(options(dir));
       expect(output).toContain("not present (local build output)");
       expect(await readFile(join(dir, "opencode.json"), "utf8")).toBe(source);
-      expect(output).toContain("CLI plugin: config not found");
-      expect(output).toContain("Legacy TUI plugin: config not found");
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
@@ -258,12 +201,9 @@ describe("CLI v2 configuration", () => {
     }
   });
 
-  test("preserves option warnings and session summary behavior", () => {
+  test("preserves option parsing and session summary behavior", () => {
     expect(parseOptions(["--limit", "nope", "--port", "0"])).toMatchObject({ limit: 20, limitProvided: true, port: 8765 });
     expect(parseOptions(["--config-dir", "/tmp/opencode", "--dry-run", "--keep-data"])).toMatchObject({ configDir: "/tmp/opencode", dryRun: true, keepData: true });
-    expect(unsupportedFlagWarning("--db")).toContain("dbPath");
-    expect(unsupportedFlagWarning("--data-dir")).toContain("no longer supported");
-    expect(unsupportedFlagWarning("--limit")).toBeUndefined();
     const rows = summarizeSessions([
       {
         id: "ses_1",

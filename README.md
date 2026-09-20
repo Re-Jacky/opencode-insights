@@ -67,8 +67,8 @@ OpenCode Insights viewer listening at http://127.0.0.1:8765
 ## Uninstall
 
 Remove this package from the `plugins` array in `opencode.json` / `opencode.jsonc`.
-The command also cleans stale entries from `cli.json(c)` and legacy `tui.json(c)`
-files, then deletes the local Insights database files:
+The command removes the package from `opencode.json(c)` and deletes the local
+Insights database files:
 
 ```bash
 opencode-insights uninstall
@@ -89,7 +89,7 @@ opencode-insights uninstall --keep-data
 Use a custom OpenCode config directory or data location:
 
 ```bash
-opencode-insights uninstall --config-dir ~/.config/opencode --data-dir ~/.opencode-insights
+  OPENCODE_CONFIG_DIR=~/.config/opencode opencode-insights uninstall
 ```
 
 After uninstalling, restart OpenCode. Packages cached by OpenCode are stored under its package cache. On macOS/Linux this is typically:
@@ -119,7 +119,7 @@ The right sidebar contains the plugin sections: `Token Usage`, `Go Usage` (when 
 On TUI startup, Insights creates a configuration file beside its database:
 
 ```text
-~/.opencode-insights/config.json
+~/.opencode-insights/config.jsonc
 ```
 
 With a custom database path, the configuration file is created in that database's directory. The default keeps the prompt-right display compact:
@@ -311,11 +311,9 @@ comments allowed). The plugin creates it on first run with `dbPath` commented ou
 }
 ```
 
-A legacy `config.json` is still honored when `config.jsonc` does not exist. Plugin
-params such as `{ "dbPath": … }` in `opencode.json` are ignored after the upgrade —
-if you previously set `dbPath` or `retentionDays` there, copy those values into
-`~/.opencode-insights/config.jsonc`. CLI commands read the configured database path
-from this file; the former `--db`/`--data-dir`/`--retention-days` flags are removed.
+Only `config.jsonc` is read. Plugin parameters in `opencode.json(c)` do not configure
+storage; set `dbPath` or `retentionDays` in `~/.opencode-insights/config.jsonc`.
+CLI commands read the configured database path from this file.
 
 ## Privacy Model
 

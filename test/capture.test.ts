@@ -8,7 +8,6 @@ import {
   defaultDataDir,
   readInsightsConfig,
   resolveInsightsConfigPath,
-  resolveLegacyInsightsConfigPath,
   normalizeEventCapture,
   normalizePromptCapture,
   normalizeContextCapture,
@@ -130,7 +129,6 @@ describe("full-fidelity local capture", () => {
     expect(jsonc).toContain('"retentionDays": 1');
     expect(jsonc).toContain('// "dbPath"');
     expect(jsonc.match(/^\s*"dbPath"/m)).toBeNull();
-    await expect(readFile(resolveLegacyInsightsConfigPath({ dataDir }), "utf8")).rejects.toThrow();
   });
 
   test("parses dbPath and retentionDays from jsonc config", async () => {
@@ -159,31 +157,6 @@ describe("full-fidelity local capture", () => {
     );
 
     await expect(readInsightsConfig({ dataDir })).resolves.toMatchObject({ retentionDays: 3 });
-  });
-
-  test("falls back to the legacy config.json when config.jsonc is absent", async () => {
-    const dataDir = await mkdtemp(join(tmpdir(), "opencode-insights-config-"));
-    cleanup.push(dataDir);
-    await writeFile(
-      resolveLegacyInsightsConfigPath({ dataDir }),
-      JSON.stringify({ promptRightMetrics: ["used"], retentionDays: 7 })
-    );
-
-    await expect(readInsightsConfig({ dataDir })).resolves.toEqual({
-      promptRightMetrics: ["used"],
-      goUsage: { enabled: false, cookie: "", workspaceID: "", refreshMs: 300_000 },
-      copilotUsage: { enabled: false, token: "", refreshMs: 300_000 },
-      retentionDays: 7
-    });
-  });
-
-  test("prefers config.jsonc over a legacy config.json", async () => {
-    const dataDir = await mkdtemp(join(tmpdir(), "opencode-insights-config-"));
-    cleanup.push(dataDir);
-    await writeFile(resolveInsightsConfigPath({ dataDir }), JSON.stringify({ promptRightMetrics: ["cache"] }));
-    await writeFile(resolveLegacyInsightsConfigPath({ dataDir }), JSON.stringify({ promptRightMetrics: ["used"] }));
-
-    await expect(readInsightsConfig({ dataDir })).resolves.toMatchObject({ promptRightMetrics: ["cache"] });
   });
 
   test("reads supported configured prompt-right metrics in order", async () => {

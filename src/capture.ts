@@ -34,7 +34,6 @@ export type InsightsOptions = {
   dataDir?: unknown;
   dbPath?: unknown;
   retentionDays?: unknown;
-  cliShim?: unknown;
 };
 
 export type GoUsageConfig = {
@@ -176,10 +175,6 @@ export function resolveInsightsConfigPath(options: InsightsOptions = {}) {
   return join(resolveConfigDataDir(options), "config.jsonc");
 }
 
-export function resolveLegacyInsightsConfigPath(options: InsightsOptions = {}) {
-  return join(resolveConfigDataDir(options), "config.json");
-}
-
 function resolveConfigDataDir(options: InsightsOptions = {}) {
   return typeof options.dataDir === "string" && options.dataDir.length > 0
     ? options.dataDir
@@ -190,11 +185,6 @@ export async function readInsightsConfig(options: InsightsOptions = {}): Promise
   const jsoncPath = resolveInsightsConfigPath(options);
   if (existsSync(jsoncPath)) {
     return parseInsightsConfigFile(jsoncPath);
-  }
-
-  const legacyPath = resolveLegacyInsightsConfigPath(options);
-  if (existsSync(legacyPath)) {
-    return parseInsightsConfigFile(legacyPath);
   }
 
   try {

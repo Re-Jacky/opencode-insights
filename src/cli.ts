@@ -15,7 +15,6 @@ const execFileAsync = promisify(execFile);
 const DEFAULT_RECENT_LIMIT = 20;
 const DEFAULT_HISTORY_LIMIT = 5_000;
 const SERVER_PLUGIN_SPEC = "@rejacky/opencode-insights";
-const SUBPATH_TUI_PLUGIN_SPEC = "@rejacky/opencode-insights/tui";
 
 type CliOptions = {
   dbPath?: string | undefined;
@@ -31,21 +30,8 @@ type CliOptions = {
   keepData: boolean;
 };
 
-export function unsupportedFlagWarning(arg: string): string | undefined {
-  if (arg === "--data-dir") {
-    return "warning: --data-dir is no longer supported; the CLI reads the configured database path from ~/.opencode-insights/config.jsonc";
-  }
-  const setting = arg === "--db" ? "dbPath" : arg === "--retention-days" ? "retentionDays" : undefined;
-  if (!setting) return undefined;
-  return `warning: ${arg} is no longer supported; set ${setting} in ~/.opencode-insights/config.jsonc`;
-}
-
 async function main(argv: string[]) {
   const command = argv[2] ?? "recent";
-  for (const arg of argv.slice(3)) {
-    const warning = unsupportedFlagWarning(arg);
-    if (warning) process.stderr.write(`${warning}\n`);
-  }
   const options = parseOptions(argv.slice(3));
   const positionals = parsePositionals(argv.slice(3));
   const config = await readInsightsConfig();
@@ -187,7 +173,7 @@ function parsePositionals(args: string[]) {
     const arg = args[index];
     if (!arg) continue;
     if (arg.startsWith("--")) {
-      if (["--db", "--data-dir", "--limit", "--host", "--port", "--output", "--config-dir", "--retention-days"].includes(arg)) index += 1;
+      if (["--limit", "--host", "--port", "--output", "--config-dir"].includes(arg)) index += 1;
       continue;
     }
     if (arg === "-o") {
@@ -357,25 +343,15 @@ export async function configureOpenCodeDebug(options: CliOptions) {
 export async function revertOpenCodeDebug(options: CliOptions) {
   const configDir = options.configDir ?? defaultOpenCodeConfigDir();
   const opencodePath = resolveOpenCodeConfigPath(configDir);
-  const cliPath = resolveOptionalConfigPath(configDir, "cli");
-  const tuiPath = resolveOptionalConfigPath(configDir, "tui");
   const officialSpec = `${SERVER_PLUGIN_SPEC}@latest`;
 
-  const serverResult = await revertPluginToOfficial(opencodePath, officialSpec, options, "plugins");
-  const cliResult = await removeInsightsFromConfig(cliPath, options);
-  const tuiResult = await removeInsightsFromConfig(tuiPath, options);
-  const changed = [serverResult, cliResult, tuiResult].some(
-    (result) => result.startsWith("replaced") || result.startsWith("removed")
-  );
+  const result = await revertPluginToOfficial(opencodePath, officialSpec, options, "plugins");
+  const changed = result.startsWith("replaced");
 
   const lines = [
     `OpenCode config: ${opencodePath}`,
-    `CLI config: ${cliPath}`,
-    `Legacy TUI config: ${tuiPath}`,
     `Official plugin spec: ${officialSpec}`,
-    `Server plugin: ${serverResult}`,
-    `CLI plugin: ${cliResult}`,
-    `Legacy TUI plugin: ${tuiResult}`
+    `Plugin: ${result}`
   ];
 
   if (options.dryRun) {
@@ -404,19 +380,6 @@ async function revertPluginToOfficial(path: string, officialSpec: string, option
   if (options.dryRun) return `would replace local build with ${officialSpec}`;
   await writeJsonConfig(path, config, source);
   return `replaced local build with ${officialSpec}`;
-}
-
-async function removeInsightsFromConfig(path: string, options: CliOptions) {
-  if (!existsSync(path)) return "config not found";
-  const source = await readJsonConfigSource(path);
-  const config = await readJsonConfig(path, { plugins: [] }, source);
-  const current = Array.isArray(config.plugins) ? config.plugins : [];
-  const next = current.filter((entry) => !isInsightsPluginEntry(entry));
-  if (next.length === current.length) return "not present (local build output)";
-  config.plugins = next;
-  if (options.dryRun) return "would remove stale Insights entries";
-  await writeJsonConfig(path, config, source);
-  return "removed stale Insights entries";
 }
 
 function isLocalDistEntry(entry: unknown): boolean {
@@ -514,27 +477,6 @@ function isJsonObject(value: unknown): value is JsonObject {
   return !!value && typeof value === "object" && !Array.isArray(value);
 }
 
-export function addUniquePlugin(config: JsonObject, plugin: string) {
-  const current = Array.isArray(config.plugins) ? config.plugins : [];
-  if (current.some((entry) => pluginSpec(entry) === plugin)) {
-    config.plugins = current;
-    return false;
-  }
-  config.plugins = [...current, plugin];
-  return true;
-}
-
-export function removePlugin(config: JsonObject, plugin: string) {
-  const current = Array.isArray(config.plugins) ? config.plugins : [];
-  const next = current.filter((entry) => !isPluginEntry(entry, plugin));
-  config.plugins = next;
-  return next.length !== current.length;
-}
-
-function isPluginEntry(entry: unknown, plugin: string) {
-  return pluginSpec(entry) === plugin;
-}
-
 export function setSinglePluginSpec(config: JsonObject, nextPlugin: unknown) {
   const current = Array.isArray(config.plugins) ? config.plugins : [];
   const next = current.filter(
@@ -556,7 +498,7 @@ function pluginSpec(entry: unknown): string | undefined {
 }
 
 function isInsightsSpec(spec: string): boolean {
-  if (spec === SERVER_PLUGIN_SPEC || spec === SUBPATH_TUI_PLUGIN_SPEC) return true;
+  if (spec === SERVER_PLUGIN_SPEC) return true;
   if (spec.startsWith("npm:")) return isInsightsSpec(spec.slice(4));
   if (spec.startsWith(`${SERVER_PLUGIN_SPEC}@`)) return true;
   const normalized = spec.replaceAll("\\", "/");
@@ -566,31 +508,17 @@ function isInsightsSpec(spec: string): boolean {
 export async function uninstallOpenCode(options: CliOptions) {
   const configDir = options.configDir ?? defaultOpenCodeConfigDir();
   const opencodePath = resolveOpenCodeConfigPath(configDir);
-  const cliPath = resolveOptionalConfigPath(configDir, "cli");
-  const tuiPath = resolveOptionalConfigPath(configDir, "tui");
   const dbPath = resolveCapturePath(options);
   const jsonlPath = dbPath.endsWith(".sqlite") ? `${dbPath}.jsonl` : dbPath;
 
   const lines = [
     `OpenCode config: ${opencodePath}`,
-    `CLI config: ${cliPath}`,
-    `Legacy TUI config: ${tuiPath}`,
     `DB path: ${dbPath}`,
     `JSONL fallback path: ${jsonlPath}`
   ];
 
-  const results = await Promise.all([
-    removePluginFromConfig(opencodePath, SERVER_PLUGIN_SPEC, options),
-    removePluginFromConfig(cliPath, SERVER_PLUGIN_SPEC, options),
-    removePluginFromConfig(cliPath, SUBPATH_TUI_PLUGIN_SPEC, options),
-    removePluginFromConfig(tuiPath, SERVER_PLUGIN_SPEC, options),
-    removePluginFromConfig(tuiPath, SUBPATH_TUI_PLUGIN_SPEC, options)
-  ]);
-  lines.push(`Server plugin: ${results[0]}`);
-  lines.push(`CLI plugin: ${results[1]}`);
-  lines.push(`CLI subpath plugin: ${results[2]}`);
-  lines.push(`Legacy TUI plugin: ${results[3]}`);
-  lines.push(`Legacy TUI subpath plugin: ${results[4]}`);
+  const result = await removePluginFromConfig(opencodePath, SERVER_PLUGIN_SPEC, options);
+  lines.push(`Plugin: ${result}`);
 
   if (options.keepData) {
     lines.push("Data cleanup: skipped (--keep-data).");
@@ -662,13 +590,6 @@ function usage() {
     "",
     "OpenCode v2 uses the plugins array in opencode.json(c). The package's TUI export is loaded automatically; cli.json(c) is only for CLI-only plugins."
   ].join("\n");
-}
-
-function resolveOptionalConfigPath(configDir: string, name: "cli" | "tui") {
-  const jsoncPath = join(configDir, `${name}.jsonc`);
-  if (existsSync(jsoncPath)) return jsoncPath;
-  const jsonPath = join(configDir, `${name}.json`);
-  return existsSync(jsonPath) ? jsonPath : jsoncPath;
 }
 
 function isDirectRun() {
