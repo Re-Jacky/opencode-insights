@@ -92,12 +92,12 @@ function providerIDFrom(input: unknown): string | undefined {
 
 function sessionIDFrom(input: unknown): string | undefined {
   if (!isRecord(input)) return undefined;
-  return optionalString(input.sessionID) ?? optionalString(input.sessionId) ?? optionalString(input.id);
+  return optionalString(input.sessionID) ?? optionalString(input.sessionId);
 }
 
 function messageIDFrom(input: unknown): string | undefined {
   if (!isRecord(input)) return undefined;
-  return optionalString(input.messageID) ?? optionalString(input.messageId) ?? optionalString(input.id);
+  return optionalString(input.messageID) ?? optionalString(input.messageId);
 }
 
 function nestedRecord(input: Record<string, unknown>, key: string) {
@@ -112,8 +112,8 @@ function eventIdentifiers(event: unknown) {
   const nestedModel = model ? nestedRecord(model, "model") : undefined;
   const provider = model ? nestedRecord(model, "provider") : undefined;
   return {
-    sessionID: sessionIDFrom(record) ?? sessionIDFrom(session) ?? sessionIDFrom(message),
-    messageID: messageIDFrom(record) ?? messageIDFrom(message),
+    sessionID: sessionIDFrom(record) ?? (typeof session?.id === "string" ? session.id : undefined) ?? sessionIDFrom(message),
+    messageID: messageIDFrom(record) ?? (typeof message?.id === "string" ? message.id : undefined),
     providerID: providerIDFrom(record) ?? providerIDFrom(model) ?? providerIDFrom(provider),
     modelID: modelIDFrom(record) ?? modelIDFrom(model) ?? modelIDFrom(nestedModel)
   };
@@ -348,7 +348,7 @@ export function normalizeEventCapture(event: unknown, timestamp = Date.now()): C
     id: nextID(timestamp),
     kind: "event",
     timestamp,
-    sessionID: sessionIDFrom(properties) ?? sessionIDFrom(info) ?? sessionIDFrom(part) ?? sessionIDFrom(record),
+    sessionID: sessionIDFrom(properties) ?? sessionIDFrom(info) ?? sessionIDFrom(part),
     messageID: messageIDFrom(properties) ?? messageIDFrom(info) ?? messageIDFrom(part),
     payload: { event }
   });

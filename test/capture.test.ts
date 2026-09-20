@@ -94,6 +94,16 @@ describe("full-fidelity local capture", () => {
     });
   });
 
+  test("does not infer session or message identifiers from unrelated ids", () => {
+    const tool = normalizeToolCapture("tool.execute.before", { id: "call_1", tool: "bash" }, 6);
+    const event = normalizeEventCapture({ id: "event_1", type: "server.connected" }, 7);
+
+    expect(tool.sessionID).toBeUndefined();
+    expect(tool.messageID).toBeUndefined();
+    expect(event.sessionID).toBeUndefined();
+    expect(event.messageID).toBeUndefined();
+  });
+
   test("uses a cross-platform home directory for default storage", () => {
     expect(defaultDataDir()).toMatch(/\.opencode-insights$/);
   });

@@ -39,9 +39,23 @@ export type HistoryRequest = {
   modelID?: string | undefined;
   summary: string;
   payload: Record<string, unknown>;
+  context?: HistoryContext | undefined;
+  modelRequest?: HistoryModelRequest | undefined;
   system?: HistoryRequestHeaders | undefined;
   headers?: HistoryRequestHeaders | undefined;
   response?: HistoryResponse | undefined;
+};
+
+export type HistoryContext = {
+  system?: unknown;
+  messages?: unknown;
+  options?: unknown;
+};
+
+export type HistoryModelRequest = {
+  headers?: unknown;
+  body?: unknown;
+  options?: unknown;
 };
 
 export type HistoryRequestHeaders = {
@@ -177,6 +191,7 @@ export function buildRequestHistory(records: CaptureRecord[]): RequestHistory {
   const messages = new Map<string, HistoryMessage>();
   const responses = new Map<string, HistoryResponse>();
   const responsesByParent = new Map<string, HistoryResponse[]>();
+  const pendingTools = new Map<string, Record<string, unknown>[]>();
   const requests: HistoryRequest[] = [];
 
   const getSession = (sessionID: string): HistorySession => {
@@ -256,15 +271,29 @@ export function buildRequestHistory(records: CaptureRecord[]): RequestHistory {
       if (record.kind === "context" && Array.isArray(event.system)) {
         request.system = { id: record.id, timestamp: record.timestamp, payload: record.payload };
       }
+      if (record.kind === "context") {
+        request.context = {
+          system: event.system,
+          messages: event.messages,
+          options: event.options
+        };
+      }
       if (record.kind === "model.request") {
-        request.headers = { id: record.id, timestamp: record.timestamp, payload: record.payload };
+        request.modelRequest = {
+          headers: event.headers,
+          body: event.body,
+          options: event.options
+        };
       }
       addRequest(request);
     }
 
     if (record.kind === "tool.execute.before" || record.kind === "tool.execute.after") {
-      const response = record.sessionID && record.messageID ? responses.get(`${record.sessionID}:${record.messageID}`) : undefined;
-      response?.events.push(record.payload);
+      if (!record.sessionID || !record.messageID) continue;
+      const key = `${record.sessionID}:${record.messageID}`;
+      const response = responses.get(key);
+      if (response) response.events.push(record.payload);
+      else (pendingTools.get(key) ?? (pendingTools.set(key, []), pendingTools.get(key)!)).push(record.payload);
     }
 
     if (record.kind !== "event") continue;
@@ -302,6 +331,11 @@ export function buildRequestHistory(records: CaptureRecord[]): RequestHistory {
         response.cost = typeof info.cost === "number" ? info.cost : response.cost;
         response.finish = optionalString(info.finish) ?? response.finish;
         response.events.push(record.payload);
+        const pending = pendingTools.get(`${sessionID}:${messageID}`);
+        if (pending) {
+          response.events.unshift(...pending);
+          pendingTools.delete(`${sessionID}:${messageID}`);
+        }
         addResponseByParent(response);
         continue;
       }

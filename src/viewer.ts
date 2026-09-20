@@ -139,11 +139,14 @@ export function buildViewerHiddenContexts(message: HistoryMessage): ViewerHidden
   const contexts = new Map<string, ViewerHiddenContext>();
   for (const request of message.requests || []) {
     const step = [request.agent || "agent", request.providerID, request.modelID].filter(Boolean).join(" · ");
-    if (request.system?.payload?.output) {
-      addHiddenContext(contexts, "System Transform Output", step, request.system.payload.output);
+    if (request.context?.system !== undefined) {
+      addHiddenContext(contexts, "System Context", step, request.context.system);
     }
-    if (request.agent === "messages.transform" && request.payload) {
-      addHiddenContext(contexts, "Messages Transform Output", step, request.payload.output || request.payload);
+    if (request.context?.messages !== undefined) {
+      addHiddenContext(contexts, "Messages Context", step, request.context.messages);
+    }
+    if (request.context?.options !== undefined) {
+      addHiddenContext(contexts, "Context Options", step, request.context.options);
     }
   }
   return [...contexts.values()];

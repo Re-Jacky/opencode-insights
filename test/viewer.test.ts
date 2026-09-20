@@ -57,8 +57,7 @@ describe("viewer conversation helpers", () => {
     ]);
   });
 
-  test("dedupes repeated hidden system prompts and renders plain text", () => {
-    const system = { system: ["You are opencode.", "Keep responses short."] };
+  test("renders v2 system, messages, and options context without transform assumptions", () => {
     const message: HistoryMessage = {
       id: "msg_user",
       sessionID: "ses_1",
@@ -74,7 +73,8 @@ describe("viewer conversation helpers", () => {
           purpose: "Generate the assistant response for the user message.",
           summary: "hi",
           payload: {},
-          system: { id: "sys_1", timestamp: 999, payload: { output: system } }
+          context: { system: ["You are opencode."], messages: [{ role: "user", content: "hi" }], options: { temperature: 0 } },
+          system: { id: "sys_1", timestamp: 999, payload: { event: { system: ["You are opencode."] } } }
         },
         {
           id: "req_2",
@@ -85,42 +85,26 @@ describe("viewer conversation helpers", () => {
           purpose: "Generate the assistant response for the user message.",
           summary: "hi",
           payload: {},
-          system: { id: "sys_2", timestamp: 1_999, payload: { output: system } }
+          context: { system: ["You are opencode."], messages: [{ role: "user", content: "hi" }], options: { temperature: 0 } },
+          system: { id: "sys_2", timestamp: 1_999, payload: { event: { system: ["You are opencode."] } } }
         }
       ]
     };
 
-    expect(buildViewerHiddenContexts(message)).toEqual([
-      {
-        title: "System Transform Output",
-        step: "build",
-        preview: "You are opencode. Keep responses short.",
-        text: "You are opencode.\n\nKeep responses short.",
-        count: 2
-      }
-    ]);
+    expect(buildViewerHiddenContexts(message)).toEqual(expect.arrayContaining([
+      expect.objectContaining({ title: "System Context", text: "You are opencode.", count: 2 }),
+      expect.objectContaining({ title: "Messages Context", text: "user\n\nhi", count: 2 }),
+      expect.objectContaining({ title: "Context Options", text: expect.stringContaining('"temperature": 0'), count: 2 })
+    ]));
   });
 
-  test("viewer history skips bulky messages transform payloads by default", async () => {
+  test("viewer history reads v2 hidden context", async () => {
     const dir = await mkdtemp(join(tmpdir(), "opencode-insights-viewer-"));
     const dbPath = join(dir, "insights.sqlite");
     try {
-      const systemPayload = JSON.stringify({ input: { sessionID: "ses_1", model: { id: "gpt-test", providerID: "openai" } }, output: { system: ["system prompt"] } });
-      const paramsPayload = JSON.stringify({
-        input: { sessionID: "ses_1", agent: "build", message: { id: "msg_user" }, provider: { id: "openai" }, model: { id: "gpt-test" } },
-        output: { maxOutputTokens: 4096 }
-      });
-      const messagePayload = JSON.stringify({
-        input: { sessionID: "ses_1" },
-        output: {
-          message: { id: "msg_user", role: "user", sessionID: "ses_1", time: { created: 1_000 } },
-          parts: [{ type: "text", messageID: "msg_user", sessionID: "ses_1", text: "hi" }]
-        }
-      });
-      const bulkyTransformPayload = JSON.stringify({
-        input: { sessionID: "ses_1" },
-        output: { messages: [{ info: { id: "msg_user", role: "user" }, parts: [{ text: "x".repeat(100_000) }] }] }
-      });
+      const promptPayload = JSON.stringify({ event: { sessionID: "ses_1", messageID: "msg_user", text: "hi" } });
+      const contextPayload = JSON.stringify({ event: { system: ["system prompt"], messages: [{ role: "user", content: "hi" }], options: { temperature: 0 } } });
+      const requestPayload = JSON.stringify({ event: { headers: { authorization: "secret" }, body: { stream: true } } });
 
       await execFileAsync("sqlite3", [
         dbPath,
@@ -135,10 +119,9 @@ describe("viewer conversation helpers", () => {
           event_type text,
           payload_json text not null
         );
-        insert into captures values ('msg', 'chat.message', 1000, 'ses_1', null, null, null, null, '${messagePayload.replace(/'/g, "''")}');
-        insert into captures values ('sys', 'experimental.chat.system.transform', 1010, 'ses_1', null, 'openai', 'gpt-test', null, '${systemPayload.replace(/'/g, "''")}');
-        insert into captures values ('params', 'chat.params', 1011, 'ses_1', null, 'openai', 'gpt-test', null, '${paramsPayload.replace(/'/g, "''")}');
-        insert into captures values ('transform', 'experimental.chat.messages.transform', 1012, 'ses_1', 'msg_user', null, null, null, '${bulkyTransformPayload.replace(/'/g, "''")}');`
+         insert into captures values ('prompt', 'prompt', 1000, 'ses_1', 'msg_user', null, null, null, '${promptPayload.replace(/'/g, "''")}');
+         insert into captures values ('context', 'context', 1010, 'ses_1', 'msg_user', null, null, null, '${contextPayload.replace(/'/g, "''")}');
+         insert into captures values ('request', 'model.request', 1011, 'ses_1', 'msg_user', 'openai', 'gpt-test', null, '${requestPayload.replace(/'/g, "''")}');`
       ]);
 
       const history = await readHistory({ dbPath, limit: 100 });
@@ -146,7 +129,7 @@ describe("viewer conversation helpers", () => {
         hiddenContexts?: ReturnType<typeof buildViewerHiddenContexts>;
       };
 
-      expect(message?.hiddenContexts?.map((item) => item.title)).toEqual(["System Transform Output"]);
+       expect(message?.hiddenContexts?.map((item) => item.title)).toContain("System Context");
       expect(message?.hiddenContexts?.[0]?.text).toBe("system prompt");
     } finally {
       await rm(dir, { recursive: true, force: true });

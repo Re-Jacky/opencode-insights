@@ -52,4 +52,44 @@ describe("capture inspection", () => {
     ]));
     expect(history.requests.map((request) => request.id)).toEqual(["request_2", "request_1", "context_2", "context_1"]);
   });
+
+  test("keeps early tool captures when the assistant response is created later", () => {
+    const history = buildRequestHistory([
+      { id: "prompt", kind: "prompt", timestamp: 1_000, sessionID: "ses_1", messageID: "msg_user", payload: { event: { text: "run it" } } },
+      { id: "tool", kind: "tool.execute.before", timestamp: 1_010, sessionID: "ses_1", messageID: "msg_assistant", payload: { event: { tool: "bash", callID: "call_1" } } },
+      { id: "assistant", kind: "event", timestamp: 1_020, sessionID: "ses_1", payload: { event: { type: "message.updated", properties: { info: { id: "msg_assistant", sessionID: "ses_1", role: "assistant", parentID: "msg_user", time: { created: 1_020, completed: 1_100 }, tokens: { input: 4 }, cost: 0.1, finish: "tool-calls" } } } } },
+      { id: "text", kind: "event", timestamp: 1_030, sessionID: "ses_1", payload: { event: { type: "message.part.updated", properties: { part: { type: "text", sessionID: "ses_1", messageID: "msg_assistant", text: "done" } } } } }
+    ]);
+
+    expect(history.sessions[0]?.messages[0]?.response).toMatchObject({
+      id: "msg_assistant", createdAt: 1_020, completedAt: 1_100, tokens: { input: 4 }, cost: 0.1, finish: "tool-calls",
+      events: expect.arrayContaining([{ event: { tool: "bash", callID: "call_1" } }])
+    });
+  });
+
+  test("retains v2 context categories and distinct model request metadata", () => {
+    const history = buildRequestHistory([
+      { id: "prompt", kind: "prompt", timestamp: 1_000, sessionID: "ses_1", messageID: "msg_user", payload: { event: { text: "hello" } } },
+      { id: "context", kind: "context", timestamp: 1_010, sessionID: "ses_1", messageID: "msg_user", payload: { event: { system: ["system"], messages: [{ role: "user", content: "hello" }], options: { temperature: 0 } } } },
+      { id: "request", kind: "model.request", timestamp: 1_020, sessionID: "ses_1", messageID: "msg_user", providerID: "openai", modelID: "gpt-5", payload: { event: { headers: { authorization: "secret" }, body: { stream: true } } } }
+    ]);
+    const request = history.sessions[0]?.messages[0]?.requests;
+
+    expect(request?.[0]?.context).toMatchObject({ system: ["system"], messages: [{ role: "user", content: "hello" }], options: { temperature: 0 } });
+    expect(request?.[1]?.modelRequest).toMatchObject({ headers: { authorization: "secret" }, body: { stream: true } });
+    expect(request?.[1]?.payload.event).toMatchObject({ headers: { authorization: "secret" } });
+  });
+
+  test("reconstructs multiple assistant responses with timing and ownership order", () => {
+    const history = buildRequestHistory([
+      { id: "prompt", kind: "prompt", timestamp: 1_000, sessionID: "ses_1", messageID: "msg_user", payload: { event: { text: "multi" } } },
+      { id: "request_1", kind: "model.request", timestamp: 1_010, sessionID: "ses_1", messageID: "msg_user", payload: { event: {} } },
+      { id: "assistant_1", kind: "event", timestamp: 1_020, sessionID: "ses_1", payload: { event: { type: "message.updated", properties: { info: { id: "assistant_1", sessionID: "ses_1", role: "assistant", parentID: "msg_user", time: { created: 1_020, completed: 1_030 }, tokens: { output: 2 }, cost: 0.2, finish: "stop" } } } } },
+      { id: "request_2", kind: "model.request", timestamp: 1_040, sessionID: "ses_1", messageID: "msg_user", payload: { event: {} } },
+      { id: "assistant_2", kind: "event", timestamp: 1_050, sessionID: "ses_1", payload: { event: { type: "message.updated", properties: { info: { id: "assistant_2", sessionID: "ses_1", role: "assistant", parentID: "msg_user", time: { created: 1_050, completed: 1_060 }, finish: "stop" } } } } }
+    ]);
+    const requests = history.sessions[0]?.messages[0]?.requests;
+    expect(requests?.map((item) => item.response?.id)).toEqual(["assistant_1", "assistant_2"]);
+    expect(history.requests.map((item) => item.id)).toEqual(["request_2", "request_1"]);
+  });
 });
