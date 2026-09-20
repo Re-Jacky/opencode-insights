@@ -58,4 +58,4 @@ completed successfully with no errors
 
 ## Round 1 Commit
 
-Pending at report update; commit is created immediately after this report.
+`38d20a7` (`fix: harden v2 capture lifecycle`).
