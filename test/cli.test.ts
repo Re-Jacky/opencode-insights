@@ -170,6 +170,23 @@ describe("CLI v2 configuration", () => {
     }
   });
 
+  test("revert reports cleanup when only CLI stale entries are removed", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "opencode-insights-test-"));
+    try {
+      await writeFile(join(dir, "opencode.json"), '{"plugins": ["existing"]}\n', "utf8");
+      await writeFile(join(dir, "cli.json"), '{"plugins": ["@rejacky/opencode-insights@0.4.1", "other-cli"]}\n', "utf8");
+
+      const output = await revertOpenCodeDebug(options(dir));
+
+      expect(output).toContain("Reverted to the official package");
+      expect(output).toContain("CLI plugin: removed stale Insights entries");
+      const cli = JSON.parse(await readFile(join(dir, "cli.json"), "utf8")) as { plugins: unknown[] };
+      expect(cli.plugins).toEqual(["other-cli"]);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
   test("parses common command options", () => {
     expect(parseOptions(["--limit", "100", "--json", "--port", "9999", "-o", "/tmp/out.json"])).toMatchObject({
       limit: 100,

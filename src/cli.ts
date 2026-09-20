@@ -364,7 +364,9 @@ export async function revertOpenCodeDebug(options: CliOptions) {
   const serverResult = await revertPluginToOfficial(opencodePath, officialSpec, options, "plugins");
   const cliResult = await removeInsightsFromConfig(cliPath, options);
   const tuiResult = await removeInsightsFromConfig(tuiPath, options);
-  const changed = [serverResult, cliResult, tuiResult].some((result) => result.startsWith("replaced"));
+  const changed = [serverResult, cliResult, tuiResult].some(
+    (result) => result.startsWith("replaced") || result.startsWith("removed")
+  );
 
   const lines = [
     `OpenCode config: ${opencodePath}`,
