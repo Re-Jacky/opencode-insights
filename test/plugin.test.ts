@@ -21,25 +21,31 @@ type TestContext = {
   emitEvent: (event: unknown) => Promise<void>;
   invokeSession: (name: string, event: unknown) => Promise<void>;
   invokeTool: (name: string, event: unknown) => Promise<void>;
+  pushEvent: (event: unknown) => void;
 };
 
 function createTestContext(): TestContext {
-  let eventListener: ((event: unknown) => Promise<void>) | undefined;
+  let eventListener: ((event: unknown) => Promise<void> | void) | undefined;
   let eventResolve: ((event: unknown) => void) | undefined;
   let eventSignal: AbortSignal | undefined;
+  const eventQueue: unknown[] = [];
+  let eventQueueResolve: (() => void) | undefined;
   const sessionHooks = new Map<string, (event: unknown) => Promise<void>>();
   const toolHooks = new Map<string, (event: unknown) => Promise<void>>();
   const context = {
     options: { dataDir: "", cliShim: false },
     event: {
       subscribe: vi.fn((options: { signal: AbortSignal }) => (async function* () {
-        eventSignal = options.signal;
+              eventSignal = options.signal;
         while (!options.signal.aborted) {
-          const event = await new Promise<unknown>((resolve) => {
-            eventResolve = resolve;
-            options.signal.addEventListener("abort", () => resolve(undefined), { once: true });
-          });
-          if (!options.signal.aborted) yield event;
+          if (eventQueue.length === 0) {
+            await new Promise<void>((resolve) => {
+              eventQueueResolve = resolve;
+              options.signal.addEventListener("abort", () => resolve(), { once: true });
+            });
+          }
+          const event = eventQueue.shift();
+          if (!options.signal.aborted && event !== undefined) yield event;
         }
       })())
     },
@@ -58,12 +64,17 @@ function createTestContext(): TestContext {
       return eventSignal;
     },
     emitEvent: async (event: unknown) => {
-      eventResolve?.(event);
+      eventQueue.push(event);
+      eventQueueResolve?.();
       await eventListener?.(event);
       await Promise.resolve();
     },
     invokeSession: async (name: string, event: unknown) => sessionHooks.get(name)?.(event),
-    invokeTool: async (name: string, event: unknown) => toolHooks.get(name)?.(event)
+    invokeTool: async (name: string, event: unknown) => toolHooks.get(name)?.(event),
+    pushEvent: (event: unknown) => {
+      eventQueue.push(event);
+      eventQueueResolve?.();
+    }
   } satisfies TestContext;
   return context;
 }
@@ -117,8 +128,68 @@ describe("plugin definitions", () => {
     const cleanup = await plugin.setup(context as unknown as Parameters<typeof plugin.setup>[0]);
 
     await cleanup?.();
+    await cleanup?.();
 
     expect(context.eventSignal?.aborted).toBe(true);
     expect(close).toHaveBeenCalledOnce();
+  });
+
+  test("does not await rejected storage writes from hooks", async () => {
+    const context = createTestContext();
+    const dataDir = await mkdtemp(join(tmpdir(), "opencode-insights-plugin-"));
+    context.options.dataDir = dataDir;
+    const append = vi.spyOn(SqliteCaptureStore.prototype, "append").mockRejectedValue(new Error("storage down"));
+    const cleanup = await plugin.setup(context as unknown as Parameters<typeof plugin.setup>[0]);
+
+    await expect(context.invokeSession("prompt", { sessionID: "rejected" })).resolves.toBeUndefined();
+    expect(append).toHaveBeenCalledOnce();
+    await cleanup?.();
+  });
+
+  test("continues consuming events after an append failure", async () => {
+    const context = createTestContext();
+    const dataDir = await mkdtemp(join(tmpdir(), "opencode-insights-plugin-"));
+    context.options.dataDir = dataDir;
+    const append = vi.spyOn(SqliteCaptureStore.prototype, "append");
+    append.mockRejectedValueOnce(new Error("first event failed"));
+    const cleanup = await plugin.setup(context as unknown as Parameters<typeof plugin.setup>[0]);
+
+    context.pushEvent({ type: "session.created", properties: { sessionID: "failed" } });
+    context.pushEvent({ type: "session.updated", properties: { sessionID: "survived" } });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    expect(append).toHaveBeenCalledTimes(2);
+    await cleanup?.();
+  });
+
+  test("closes storage without waiting for an abort-insensitive subscriber", async () => {
+    const context = createTestContext();
+    const dataDir = await mkdtemp(join(tmpdir(), "opencode-insights-plugin-"));
+    context.options.dataDir = dataDir;
+    const close = vi.spyOn(SqliteCaptureStore.prototype, "close");
+    context.event.subscribe = vi.fn(() => (async function* () {
+      await new Promise<void>(() => {});
+      yield { type: "never" };
+    })());
+    const cleanup = await plugin.setup(context as unknown as Parameters<typeof plugin.setup>[0]);
+
+    await expect(Promise.race([
+      Promise.resolve(cleanup?.()).then(() => "closed"),
+      new Promise((resolve) => setTimeout(() => resolve("timed out"), 20))
+    ])).resolves.toBe("closed");
+    expect(close).toHaveBeenCalledOnce();
+  });
+
+  test("continues setup when store initialization fails", async () => {
+    const context = createTestContext();
+    const dataDir = await mkdtemp(join(tmpdir(), "opencode-insights-plugin-"));
+    context.options.dataDir = dataDir;
+    vi.spyOn(SqliteCaptureStore.prototype, "initialize").mockRejectedValue(new Error("storage unavailable"));
+
+    const cleanup = await plugin.setup(context as unknown as Parameters<typeof plugin.setup>[0]);
+
+    expect(context.event.subscribe).toHaveBeenCalledOnce();
+    expect(context.session.hook).toHaveBeenCalledWith("prompt", expect.any(Function));
+    await cleanup?.();
   });
 });

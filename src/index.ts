@@ -16,8 +16,8 @@ const id = "opencode-insights";
 type V2Context = {
   options: Readonly<Record<string, unknown>>;
   event: { subscribe: (options: { signal: AbortSignal }) => AsyncIterable<unknown> };
-  session: { hook: (name: "prompt" | "context" | "model.request", callback: (event: unknown) => Promise<void>) => unknown };
-  tool: { hook: (name: "execute.before" | "execute.after", callback: (event: unknown) => Promise<void>) => unknown };
+  session: { hook: (name: "prompt" | "context" | "model.request", callback: (event: unknown) => Promise<void> | void) => unknown };
+  tool: { hook: (name: "execute.before" | "execute.after", callback: (event: unknown) => Promise<void> | void) => unknown };
 };
 
 const setup = async (ctx: V2Context) => {
@@ -26,7 +26,9 @@ const setup = async (ctx: V2Context) => {
   const config = await readInsightsConfig({ dataDir });
   const storeOptions = insightsOptionsFromConfig(config, dataDir);
   const store = createCaptureStore(storeOptions);
-  await store.initialize?.();
+  try {
+    await store.initialize?.();
+  } catch {}
 
   let captureQueue = Promise.resolve();
   const captureSafely = (record: Parameters<CaptureStore["append"]>[0]) => {
@@ -36,28 +38,39 @@ const setup = async (ctx: V2Context) => {
       } catch {}
     });
     captureQueue = capture.catch(() => {});
-    return capture;
+    void capture;
   };
 
   const controller = new AbortController();
   const subscriber = (async () => {
     try {
       for await (const event of ctx.event.subscribe({ signal: controller.signal })) {
-        await captureSafely(normalizeEventCapture(event));
+        captureSafely(normalizeEventCapture(event));
       }
     } catch {}
   })();
 
-  ctx.session.hook("prompt", async (event: unknown) => captureSafely(normalizePromptCapture(event)));
-  ctx.session.hook("context", async (event: unknown) => captureSafely(normalizeContextCapture(event)));
-  ctx.session.hook("model.request", async (event: unknown) => captureSafely(normalizeModelRequestCapture(event)));
-  ctx.tool.hook("execute.before", async (event: unknown) => captureSafely(normalizeToolCapture("tool.execute.before", event)));
-  ctx.tool.hook("execute.after", async (event: unknown) => captureSafely(normalizeToolCapture("tool.execute.after", event)));
+  ctx.session.hook("prompt", (event: unknown) => {
+    captureSafely(normalizePromptCapture(event));
+  });
+  ctx.session.hook("context", (event: unknown) => {
+    captureSafely(normalizeContextCapture(event));
+  });
+  ctx.session.hook("model.request", (event: unknown) => {
+    captureSafely(normalizeModelRequestCapture(event));
+  });
+  ctx.tool.hook("execute.before", (event: unknown) => {
+    captureSafely(normalizeToolCapture("tool.execute.before", event));
+  });
+  ctx.tool.hook("execute.after", (event: unknown) => {
+    captureSafely(normalizeToolCapture("tool.execute.after", event));
+  });
 
+  let cleanedUp = false;
   return async () => {
+    if (cleanedUp) return;
+    cleanedUp = true;
     controller.abort();
-    await subscriber;
-    await captureQueue;
     await store.close?.();
   };
 };
