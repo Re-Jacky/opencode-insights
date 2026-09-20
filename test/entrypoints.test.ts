@@ -19,6 +19,12 @@ describe("plugin entrypoints", () => {
     expect(source).toContain("export default");
   });
 
+  test("built TUI entrypoint is a runtime v2 definition", async () => {
+    const module = await import("../dist/tui.js");
+    expect(module.default.id).toBe("opencode-insights-tui");
+    expect(typeof module.default.setup).toBe("function");
+  });
+
   test("production entrypoints do not import v1 plugin contracts", () => {
     const rootSource = readFileSync(new URL("../src/index.ts", import.meta.url), "utf8");
     const tuiSource = readFileSync(new URL("../src/tui.tsx", import.meta.url), "utf8");

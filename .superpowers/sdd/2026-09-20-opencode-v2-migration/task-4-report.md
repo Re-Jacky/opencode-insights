@@ -41,7 +41,8 @@
 - `npm test -- test/tui.test.ts test/activity-hydrate.test.ts test/entrypoints.test.ts`: PASS, 3 files, 18 tests.
 - `npm run typecheck`: PASS.
 - `npm run verify`: PASS, 14 test files, 184 tests; typecheck and ESM/declaration build passed.
+- Runtime entrypoint coverage now imports the built `dist/tui.js` definition and verifies its v2 id/setup contract.
 
 ## Round 1 Commit
 
-Pending commit creation.
+`39a3a81` contains the implementation and initial round-1 report; the runtime coverage follow-up is committed separately after verification.
