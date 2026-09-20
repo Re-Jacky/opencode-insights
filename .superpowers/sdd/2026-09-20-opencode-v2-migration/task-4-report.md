@@ -96,3 +96,18 @@ Pending commit creation.
 ## Round 4 Commit
 
 Pending commit creation.
+
+## Round 5 Fix
+
+- Replaced the fake `usageSubscriptions` increment in `test/entrypoints.test.ts` with repeated slot-renderer invocation inside real Solid `createRoot` owners, exercising the production `Usage` subscription and `onCleanup` lifecycle. Each owner is disposed immediately after its mount, and the setup cleanup still removes the v2 listeners and slots.
+- The repository's Node runtime cannot initialize OpenTUI native FFI, so the harness records the expected `No renderer found` boundary while still executing the registered component path and Solid owner cleanup. No production behavior changed.
+
+## Round 5 Verification
+
+- `npm test -- test/tui.test.ts test/entrypoints.test.ts`: PASS, 2 files, 11 tests.
+- `npm run typecheck`: PASS.
+- `npm run verify`: PASS, 14 test files, 187 tests; typecheck and ESM/declaration build passed.
+
+## Round 5 Commit
+
+Pending commit creation.

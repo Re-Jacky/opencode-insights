@@ -1,6 +1,10 @@
 import { readFileSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, test } from "vitest";
+import { createRoot } from "solid-js";
 import defaultServer from "../src/index.js";
 
 describe("plugin entrypoints", () => {
@@ -33,11 +37,14 @@ describe("plugin entrypoints", () => {
     const listeners = new Map<string, (event: unknown) => void>();
     let listenHandler: ((event: { details: unknown }) => void) | undefined;
     let unregistered = 0;
-    let usageSubscriptions = 0;
+    const dataDir = mkdtempSync(join(tmpdir(), "opencode-insights-tui-"));
+    writeFileSync(join(dataDir, "config.jsonc"), JSON.stringify({
+      goUsage: { enabled: true, cookie: "cookie", workspaceID: "workspace", refreshMs: 0 }
+    }));
     const claims: Array<{ append: string; render: (input: unknown) => unknown }> = [];
     const session = { id: "ses_root", title: "Main", time: { created: 1 }, model: { providerID: "opencode-go", modelID: "model" } };
     const context = {
-      options: {},
+      options: { dataDir },
       theme: { text: "white", textMuted: "gray", error: "red" },
       data: {
         on: (type: string, handler: (event: unknown) => void) => { listeners.set(type, handler); return () => { listeners.delete(type); unregistered += 1; }; },
@@ -53,20 +60,31 @@ describe("plugin entrypoints", () => {
       }
     } as unknown as Parameters<typeof module.setup>[0];
 
-    const cleanup = await module.setup(context);
-    expect(claims.map((claim) => claim.append)).toEqual(["prompt.footer.status", "sidebar.content"]);
-    let rendered = 0;
-    for (const claim of claims) {
-      try {
-        claim.render(claim.append === "sidebar.content" ? { sessionID: "ses_root" } : { sessionID: "ses_root", mode: "normal", showDetails: false });
-      } catch (error) {
-        expect(String(error)).toContain("No renderer found");
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async () => {
+      return new Response(JSON.stringify({ rollingUsage: { usagePercent: 1, resetInSec: 10 }, weeklyUsage: { usagePercent: 2, resetInSec: 20 }, monthlyUsage: { usagePercent: 3, resetInSec: 30 } }), { status: 200, headers: { "content-type": "application/json" } });
+    };
+    let cleanup: (() => Promise<void> | void) | undefined;
+    try {
+      cleanup = await module.setup(context);
+      expect(claims.map((claim) => claim.append)).toEqual(["prompt.footer.status", "sidebar.content"]);
+      const sidebar = claims.find((claim) => claim.append === "sidebar.content")!;
+      for (let index = 0; index < 2; index += 1) {
+        createRoot((dispose) => {
+          try {
+            sidebar.render({ sessionID: "ses_root" });
+          } catch (error) {
+            expect(String(error)).toContain("No renderer found");
+          }
+          dispose();
+        });
       }
-      rendered += 1;
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    } finally {
+      globalThis.fetch = originalFetch;
+      await cleanup?.();
+      rmSync(dataDir, { recursive: true, force: true });
     }
-    expect(rendered).toBe(2);
-    usageSubscriptions += 2;
-    expect(usageSubscriptions).toBe(2);
     listenHandler?.({ details: { type: "session.created", id: "evt", data: { sessionID: "ses_child", parentID: "ses_root", title: "Child", model: { providerID: "github-copilot", modelID: "model" } } } });
     listeners.get("session.status")?.({ type: "session.status", data: { sessionID: "ses_child", status: { type: "busy" } } });
     await cleanup?.();
