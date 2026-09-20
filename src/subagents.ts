@@ -67,8 +67,8 @@ export function recordSubagentFromSessionInfo(
   state.totalExecuted += 1;
 }
 
-export function applySubagentEvent(state: SubagentState, event: unknown) {
-  const created = extractTaskToolSubagent(event) ?? extractSubagent(event) ?? updateExistingSubagent(state, event);
+export function applySubagentEvent(state: SubagentState, event: unknown, toolPart?: unknown) {
+  const created = extractTaskToolSubagent(event, toolPart) ?? extractSubagent(event) ?? updateExistingSubagent(state, event);
   if (!created) return false;
 
   const previous = state.children[created.id];
@@ -206,24 +206,21 @@ export function renderSubagentFooter(state: SubagentState, parentID: string, opt
   return `Subagents ${model.summary}`;
 }
 
-function extractTaskToolSubagent(event: unknown): SubagentInfo | undefined {
+function extractTaskToolSubagent(event: unknown, persistedToolPart?: unknown): SubagentInfo | undefined {
   if (!isRecord(event)) return undefined;
   const evt = event as EventLike;
   if (evt.type !== "message.part.updated" && evt.type !== "session.tool.called" && evt.type !== "session.tool.success" && evt.type !== "session.tool.failed") return undefined;
 
-  const part = isRecord(evt.data?.part) ? evt.data.part : undefined;
-  const v2Task = evt.type === "session.tool.called" && evt.data ? {
+  const part = isRecord(persistedToolPart) ? persistedToolPart : isRecord(evt.data?.part) ? evt.data.part : undefined;
+  const v2Task = (evt.type === "session.tool.called" || evt.type === "session.tool.success" || evt.type === "session.tool.failed") && evt.data ? {
     type: "tool",
     tool: "task",
     state: { status: "running", input: evt.data.input, metadata: evt.data.metadata }
   } : undefined;
-  const v2Result = (evt.type === "session.tool.success" || evt.type === "session.tool.failed") && evt.data ? {
-    type: "tool",
-    tool: "task",
-    state: { status: evt.type === "session.tool.failed" ? "error" : "completed", metadata: evt.data.metadata, output: evt.data.content }
-  } : undefined;
-  const task = part ?? v2Task ?? v2Result;
-  if (!task || task.type !== "tool" || task.tool !== "task") return undefined;
+  const task = part ?? v2Task;
+  const taskRecord = isRecord(task) ? task as Record<string, unknown> : undefined;
+  const taskName = typeof taskRecord?.tool === "string" ? taskRecord.tool : typeof taskRecord?.name === "string" ? taskRecord.name : undefined;
+  if (!task || task.type !== "tool" || taskName !== "task") return undefined;
 
   const state = isRecord(task.state) ? task.state : undefined;
   if (!state) return undefined;
@@ -233,7 +230,7 @@ function extractTaskToolSubagent(event: unknown): SubagentInfo | undefined {
   const parentID = asString(metadata?.parentSessionId) ?? asString(evt.data?.sessionID);
   if (!id || !parentID || id === parentID) return undefined;
 
-  const status = taskToolStatus(state);
+  const status = evt.type === "session.tool.failed" ? "error" : evt.type === "session.tool.success" ? "done" : taskToolStatus(state);
   const startedMs = numberFromPath(state.time, "start") ?? numberFromPath(state.time, "created") ?? Date.now();
   const endedMs = numberFromPath(state.time, "end");
   const updatedMs = endedMs ?? numberFromPath(state.time, "updated") ?? startedMs;

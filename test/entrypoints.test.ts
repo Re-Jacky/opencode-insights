@@ -86,10 +86,9 @@ describe("plugin entrypoints", () => {
       rmSync(dataDir, { recursive: true, force: true });
     }
     listenHandler?.({ details: { type: "session.created", id: "evt", data: { sessionID: "ses_child", parentID: "ses_root", title: "Child", model: { providerID: "github-copilot", modelID: "model" } } } });
-    listeners.get("session.status")?.({ type: "session.status", data: { sessionID: "ses_child", status: { type: "busy" } } });
     await cleanup?.();
     await cleanup?.();
-    expect(unregistered).toBe(4);
+    expect(unregistered).toBe(3);
     expect(listeners.size).toBe(0);
     expect(listenHandler).toBeUndefined();
   });

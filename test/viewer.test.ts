@@ -57,6 +57,22 @@ describe("viewer conversation helpers", () => {
     ]);
   });
 
+  test("resolves v2 terminal tool summaries from the assistant tool part", () => {
+    const message: HistoryMessage = {
+      id: "msg_user", sessionID: "ses_1", role: "user", text: "run it", requests: [{
+        id: "req_1", sessionID: "ses_1", messageID: "msg_user", timestamp: 1_000,
+        purpose: "Dispatch a provider model request for this message.", summary: "run it", payload: {},
+        response: {
+          id: "msg_assistant", sessionID: "ses_1", role: "assistant", text: "", reasoning: "", events: [
+            { event: { type: "session.tool.success", data: { sessionID: "ses_1", assistantMessageID: "msg_assistant", id: "tool_1", content: [{ type: "text", text: "ok" }] } } },
+            { event: { type: "session.message.content.updated", data: { sessionID: "ses_1", messageID: "msg_assistant", content: [{ type: "tool", id: "tool_1", name: "bash", state: { status: "completed", input: {} } }] } } }
+          ]
+        }
+      }]
+    };
+    expect(buildViewerVisibleSteps(message)).toContainEqual({ label: "agent tool", text: "bash · completed" });
+  });
+
   test("renders v2 system, messages, and options context without transform assumptions", () => {
     const message: HistoryMessage = {
       id: "msg_user",

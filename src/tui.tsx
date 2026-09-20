@@ -44,36 +44,6 @@ function providerIDFromModel(value: unknown): string | undefined {
   return stringValue(value.providerID) ?? stringValue(value.providerId);
 }
 
-type LegacyEvent = { type: string; properties: V2Data };
-
-function legacyEvent(type: string, data: V2Data, context: Context): LegacyEvent {
-  const sessionID = stringValue(data.sessionID);
-  const messageID = stringValue(data.assistantMessageID);
-  const message = sessionID && messageID ? context.data.session.message.get(sessionID, messageID) : undefined;
-  const info = message && message.type === "assistant" ? message : undefined;
-  const providerID = providerIDFromModel(info?.model);
-  const session = sessionID ? context.data.session.get(sessionID) : undefined;
-  const base = { type, properties: { sessionID, info: info ?? (session ? { id: session.id, parentID: session.parentID, title: session.title, time: { created: session.time.created } } : undefined), status: data.status } };
-  if (providerID) return { ...base, properties: { ...base.properties, providerID } };
-  return base;
-}
-
-function subagentEvent(type: string, data: V2Data, context: Context): unknown {
-  if (type === "session.tool.success" || type === "session.tool.failed") {
-    const sessionID = stringValue(data.sessionID);
-    const messageID = stringValue(data.assistantMessageID);
-    const id = stringValue(data.id);
-    const tool = sessionID && id
-      ? context.data.session.message.list(sessionID).flatMap((entry) => entry.type === "assistant" ? entry.content : []).find((part): part is Extract<typeof part, { type: "tool" }> => part.type === "tool" && part.id === id)
-      : undefined;
-    return { type: "message.part.updated", properties: { sessionID, part: tool ? { ...tool, messageID, state: { ...tool.state, status: type.endsWith("failed") ? "error" : "completed" } } : undefined } };
-  }
-  if (type === "session.usage.updated" || type === "session.text.delta" || type === "session.reasoning.delta") {
-    return legacyEvent("message.updated", data, context);
-  }
-  return legacyEvent(type, data, context);
-}
-
 type SemanticTheme = Context["theme"];
 
 function TextSection(props: { title: string | (() => string); lines: () => string[]; theme: SemanticTheme; collapsed?: boolean; onClick?: () => void }) {
@@ -201,18 +171,16 @@ const setup = async (context: Context) => {
     goTracker.record(session.id, providerIDFromModel(session.model));
     copilotTracker.record(session.id, providerIDFromModel(session.model));
   }
-  cleanups.push(context.data.on("session.status", (event) => {
-    applySubagentEvent(subagents, legacyEvent("session.status", { sessionID: event.data.sessionID, status: event.data.status }, context));
-    metricListeners.notify();
-    subagentListeners.notify();
-  }));
   cleanups.push(context.data.listen(({ details }) => {
     const data: V2Data = isRecord(details.data) ? details.data : {};
     const eventType = details.type;
-    const event = subagentEvent(eventType, data, context) as LegacyEvent;
-    applySubagentEvent(subagents, event);
     const sessionID = stringValue(data.sessionID);
     const messageID = stringValue(data.assistantMessageID);
+    const toolID = stringValue(data.id);
+    const tool = sessionID && toolID
+      ? context.data.session.message.list(sessionID).flatMap((entry) => entry.type === "assistant" ? entry.content : []).find((part): part is Extract<typeof part, { type: "tool" }> => part.type === "tool" && part.id === toolID)
+      : undefined;
+    applySubagentEvent(subagents, details, tool);
     const message = sessionID && messageID ? context.data.session.message.get(sessionID, messageID) : undefined;
     const info = message?.type === "assistant" ? message : undefined;
     const providerID = providerIDFromModel(info?.model);

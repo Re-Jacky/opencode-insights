@@ -208,7 +208,11 @@ function viewerToolSteps(response: HistoryMessage["response"]) {
     const key = [data.id, status].filter(Boolean).join(":");
     if (seen.has(key)) continue;
     seen.add(key);
-    tools.push([typeof data.name === "string" ? data.name : "tool", status].join(" · "));
+    const toolName = (response?.events ?? [])
+      .map((candidate) => isRecord(candidate.event) && isRecord(candidate.event.data) ? candidate.event.data : undefined)
+      .flatMap((candidate) => Array.isArray(candidate?.content) ? candidate.content : [])
+      .find((part) => isRecord(part) && part.type === "tool" && part.id === data.id);
+    tools.push([isRecord(toolName) && typeof toolName.name === "string" ? toolName.name : "tool", status].join(" · "));
   }
   return tools;
 }

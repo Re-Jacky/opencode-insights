@@ -33,7 +33,7 @@ describe("v2 TUI contract", () => {
   test("uses v2 context APIs and does not retain v1 APIs", () => {
     const source = readFileSync(new URL("../src/tui.tsx", import.meta.url), "utf8");
 
-    expect(source).toContain("context.data.on");
+    expect(source).toContain("context.data.listen");
     expect(source).toContain("context.ui.slot");
     expect(source).toContain("context.ui.router.navigate");
     expect(source).toContain("context.ui.dialog");
@@ -88,11 +88,19 @@ describe("v2 TUI contract", () => {
 
   test("uses a v2 context harness shape for setup lifecycle coverage", () => {
     const source = readFileSync(new URL("../src/tui.tsx", import.meta.url), "utf8");
-    expect(source).toContain('context.data.on("session.status"');
     expect(source).toContain("context.data.listen");
     expect(source).toContain('append: "prompt.footer.status"');
     expect(source).toContain('append: "sidebar.content"');
     expect(source).toContain("cleanups.push(...slotCleanups)");
     expect(source).toContain("for (const cleanup of cleanups) cleanup()");
+  });
+
+  test("dispatches published v2 events directly to subagent and activity consumers", () => {
+    const source = readFileSync(new URL("../src/tui.tsx", import.meta.url), "utf8");
+    expect(source).not.toContain("legacyEvent");
+    expect(source).not.toContain("subagentEvent");
+    expect(source).toContain("applySubagentEvent(subagents, details, tool)");
+    expect(source).toContain("recordToolPart(activity");
+    expect(source).toContain('eventType === "session.step.ended"');
   });
 });

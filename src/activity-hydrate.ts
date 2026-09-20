@@ -62,8 +62,6 @@ function applyParts(state: ActivityState, sessionID: string, parts: Array<Record
       });
     } else if (type === "compaction" && id !== undefined) {
       recordCompaction(state, sessionID, id, part.reason === "auto");
-    } else if (type === "step" && id !== undefined) {
-      recordStep(state, sessionID, id);
     }
   }
 }
