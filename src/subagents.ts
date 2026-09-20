@@ -212,12 +212,7 @@ function extractTaskToolSubagent(event: unknown, persistedToolPart?: unknown): S
   if (evt.type !== "message.part.updated" && evt.type !== "session.tool.called" && evt.type !== "session.tool.success" && evt.type !== "session.tool.failed") return undefined;
 
   const part = isRecord(persistedToolPart) ? persistedToolPart : isRecord(evt.data?.part) ? evt.data.part : undefined;
-  const v2Task = (evt.type === "session.tool.called" || evt.type === "session.tool.success" || evt.type === "session.tool.failed") && evt.data ? {
-    type: "tool",
-    tool: "task",
-    state: { status: "running", input: evt.data.input, metadata: evt.data.metadata }
-  } : undefined;
-  const task = part ?? v2Task;
+  const task = part;
   const taskRecord = isRecord(task) ? task as Record<string, unknown> : undefined;
   const taskName = typeof taskRecord?.tool === "string" ? taskRecord.tool : typeof taskRecord?.name === "string" ? taskRecord.name : undefined;
   if (!task || task.type !== "tool" || taskName !== "task") return undefined;

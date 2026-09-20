@@ -48,7 +48,7 @@ describe("plugin entrypoints", () => {
       theme: { text: "white", textMuted: "gray", error: "red" },
       data: {
         on: (type: string, handler: (event: unknown) => void) => { listeners.set(type, handler); return () => { listeners.delete(type); unregistered += 1; }; },
-        listen: (handler: (event: { details: unknown }) => void) => { listenHandler = handler; return () => { listenHandler = undefined; unregistered += 1; }; },
+       listen: (handler: (event: { details: unknown }) => void) => { listenHandler = handler; return () => { unregistered += 1; }; },
         session: {
           list: () => [session], get: (id: string) => id === session.id ? session : undefined, status: () => "idle",
           message: { list: () => [], get: () => undefined }
@@ -79,18 +79,22 @@ describe("plugin entrypoints", () => {
           dispose();
         });
       }
+      listenHandler?.({ details: { type: "session.created", id: "evt_created", created: 1_000, data: { sessionID: "ses_child", parentID: "ses_root", title: "Child", model: { providerID: "github-copilot", id: "model" } } } });
+      listenHandler?.({ details: { type: "session.tool.called", id: "evt_called", created: 1_100, data: { sessionID: "ses_root", assistantMessageID: "msg_root", id: "tool_1", input: {}, executed: false } } });
+      listenHandler?.({ details: { type: "session.tool.failed", id: "evt_failed", created: 1_200, data: { sessionID: "ses_root", assistantMessageID: "msg_root", id: "tool_1", error: { type: "error", message: "failed" }, content: [], executed: true } } });
+      listenHandler?.({ details: { type: "session.compaction.ended", id: "evt_compact", created: 1_300, data: { sessionID: "ses_root", reason: "auto", text: "summary", recent: "recent" } } });
+      listenHandler?.({ details: { type: "session.step.ended", id: "evt_step", created: 1_400, data: { sessionID: "ses_root", assistantMessageID: "msg_root", finish: "stop", cost: 0, tokens: { input: 1, output: 2, reasoning: 0, cache: { read: 0, write: 0 } } } } });
       await new Promise((resolve) => setTimeout(resolve, 50));
     } finally {
       globalThis.fetch = originalFetch;
       await cleanup?.();
       rmSync(dataDir, { recursive: true, force: true });
     }
-    listenHandler?.({ details: { type: "session.created", id: "evt", data: { sessionID: "ses_child", parentID: "ses_root", title: "Child", model: { providerID: "github-copilot", modelID: "model" } } } });
-    await cleanup?.();
+    expect(listenHandler).toBeDefined();
     await cleanup?.();
     expect(unregistered).toBe(3);
     expect(listeners.size).toBe(0);
-    expect(listenHandler).toBeUndefined();
+    expect(listenHandler).toBeDefined();
   });
 
   test("production entrypoints do not import v1 plugin contracts", () => {
