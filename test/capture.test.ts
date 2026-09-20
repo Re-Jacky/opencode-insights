@@ -104,6 +104,14 @@ describe("full-fidelity local capture", () => {
     expect(event.messageID).toBeUndefined();
   });
 
+  test("extracts explicit session and message ID aliases from nested v2 objects", () => {
+    const sessionID = normalizeContextCapture({ session: { sessionID: "ses_upper" }, message: { messageID: "msg_upper" } }, 8);
+    const sessionId = normalizeContextCapture({ session: { sessionId: "ses_lower" }, message: { messageId: "msg_lower" } }, 9);
+
+    expect(sessionID).toMatchObject({ sessionID: "ses_upper", messageID: "msg_upper" });
+    expect(sessionId).toMatchObject({ sessionID: "ses_lower", messageID: "msg_lower" });
+  });
+
   test("uses a cross-platform home directory for default storage", () => {
     expect(defaultDataDir()).toMatch(/\.opencode-insights$/);
   });

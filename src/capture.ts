@@ -112,8 +112,8 @@ function eventIdentifiers(event: unknown) {
   const nestedModel = model ? nestedRecord(model, "model") : undefined;
   const provider = model ? nestedRecord(model, "provider") : undefined;
   return {
-    sessionID: sessionIDFrom(record) ?? (typeof session?.id === "string" ? session.id : undefined) ?? sessionIDFrom(message),
-    messageID: messageIDFrom(record) ?? (typeof message?.id === "string" ? message.id : undefined),
+    sessionID: sessionIDFrom(record) ?? sessionIDFrom(session) ?? (typeof session?.id === "string" ? session.id : undefined) ?? sessionIDFrom(message),
+    messageID: messageIDFrom(record) ?? messageIDFrom(message) ?? (typeof message?.id === "string" ? message.id : undefined),
     providerID: providerIDFrom(record) ?? providerIDFrom(model) ?? providerIDFrom(provider),
     modelID: modelIDFrom(record) ?? modelIDFrom(model) ?? modelIDFrom(nestedModel)
   };
