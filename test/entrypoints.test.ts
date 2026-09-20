@@ -70,22 +70,14 @@ describe("plugin entrypoints", () => {
       cleanup = await module.setup(context);
       expect(claims.map((claim) => claim.append)).toEqual(["prompt.footer.status", "sidebar.content"]);
       const sidebar = claims.find((claim) => claim.append === "sidebar.content")!;
-      for (let index = 0; index < 2; index += 1) {
-        createRoot((dispose) => {
-          try {
-            sidebar.render({ sessionID: "ses_root" });
-          } catch (error) {
-            expect(String(error)).toContain("No renderer found");
-          }
-          dispose();
-        });
-      }
       listenHandler?.({ details: { type: "session.created", id: "evt_created", created: 1_000, data: { sessionID: "ses_child", parentID: "ses_root", title: "Child", model: { providerID: "github-copilot", id: "model" } } } });
       listenHandler?.({ details: { type: "session.text.delta", id: "evt_delta", created: 1_050, data: { sessionID: "ses_root", assistantMessageID: "msg_root", ordinal: 0, delta: "hello" } } });
       listenHandler?.({ details: { type: "session.tool.called", id: "evt_called", created: 1_100, data: { sessionID: "ses_root", assistantMessageID: "msg_root", id: "tool_1", input: {}, executed: false } } });
       listenHandler?.({ details: { type: "session.tool.failed", id: "evt_failed", created: 1_200, data: { sessionID: "ses_root", assistantMessageID: "msg_root", id: "tool_1", error: { type: "error", message: "failed" }, content: [], executed: true } } });
       listenHandler?.({ details: { type: "session.compaction.ended", id: "evt_compact", created: 1_300, data: { sessionID: "ses_root", reason: "auto", text: "summary", recent: "recent" } } });
       listenHandler?.({ details: { type: "session.step.ended", id: "evt_step", created: 1_400, data: { sessionID: "ses_root", assistantMessageID: "msg_root", finish: "stop", cost: 0, tokens: { input: 1, output: 2, reasoning: 0, cache: { read: 0, write: 0 } } } } });
+      const runtimeBeforeUsage = (cleanup as (() => Promise<void>) & { __insightsState?: { metrics: { sessionTokenUsageByID: Record<string, unknown> } } }).__insightsState!;
+      expect(runtimeBeforeUsage.metrics.sessionTokenUsageByID.ses_root).toBeUndefined();
       listenHandler?.({ details: { type: "session.usage.updated", id: "evt_usage", created: 1_500, data: { sessionID: "ses_root", cost: 0, tokens: { input: 10, output: 7, reasoning: 2, cache: { read: 3, write: 1 } } } } });
       const runtime = (cleanup as (() => Promise<void>) & { __insightsState?: { activity: { bySessionID: Record<string, { warnings: number; autoCompacts: number; steps: number }> }; subagents: { children: Record<string, unknown> }; metrics: { sessionTokenUsageByID: Record<string, { responseCount: number; outputTokens: number }> }; render: (sessionID: string) => string } }).__insightsState!;
       expect(runtime.activity.bySessionID.ses_root).toMatchObject({ warnings: 1, autoCompacts: 1, steps: 1 });
@@ -95,23 +87,39 @@ describe("plugin entrypoints", () => {
       expect(runtime.render("ses_root")).toContain("1 auto-compact");
       expect(runtime.render("ses_root")).toContain("1 subagent");
       await new Promise((resolve) => setTimeout(resolve, 50));
-      let renderInvoked = false;
+      let renderBoundary = "";
       try {
-        renderInvoked = true;
         claims.find((claim) => claim.append === "sidebar.content")?.render({ sessionID: "ses_root" });
       } catch (error) {
-        expect(String(error)).toContain("No renderer found");
+        renderBoundary = String(error);
       }
-      expect(renderInvoked).toBe(true);
+      expect(renderBoundary).toContain("No renderer found");
+      const preCleanup = {
+        activity: JSON.stringify(runtime.activity),
+        metrics: JSON.stringify(runtime.metrics),
+        subagents: JSON.stringify(runtime.subagents),
+        renderBoundary
+      };
+      (cleanup as (() => Promise<void>) & { __insightsPreCleanup?: typeof preCleanup }).__insightsPreCleanup = preCleanup;
     } finally {
       globalThis.fetch = originalFetch;
       rmSync(dataDir, { recursive: true, force: true });
     }
     expect(listenHandler).toBeDefined();
-    const beforeCleanup = JSON.stringify((cleanup as (() => Promise<void>) & { __insightsState: { activity: unknown } }).__insightsState.activity);
+    const preCleanup = (cleanup as (() => Promise<void>) & { __insightsPreCleanup: { activity: string; metrics: string; subagents: string; renderBoundary: string } }).__insightsPreCleanup;
     await cleanup?.();
     listenHandler?.({ details: { type: "session.compaction.ended", id: "after_cleanup", created: 2_000, data: { sessionID: "ses_root", reason: "auto", text: "late", recent: "late" } } });
-    expect(JSON.stringify((cleanup as (() => Promise<void>) & { __insightsState: { activity: unknown } }).__insightsState.activity)).toBe(beforeCleanup);
+    const runtimeAfterCleanup = (cleanup as (() => Promise<void>) & { __insightsState: { activity: unknown; metrics: unknown; subagents: unknown } }).__insightsState;
+    expect(JSON.stringify(runtimeAfterCleanup.activity)).toBe(preCleanup.activity);
+    expect(JSON.stringify(runtimeAfterCleanup.metrics)).toBe(preCleanup.metrics);
+    expect(JSON.stringify(runtimeAfterCleanup.subagents)).toBe(preCleanup.subagents);
+    let postCleanupBoundary = "";
+    try {
+      claims.find((claim) => claim.append === "sidebar.content")?.render({ sessionID: "ses_root" });
+    } catch (error) {
+      postCleanupBoundary = String(error);
+    }
+    expect(postCleanupBoundary).toBe(preCleanup.renderBoundary);
     await cleanup?.();
     expect(unregistered).toBe(3);
     expect(listeners.size).toBe(0);
