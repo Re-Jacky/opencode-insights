@@ -40,8 +40,8 @@ describe("hydrateActivity", () => {
       { id: "ses_root" }, { id: "ses_a", parentID: "ses_root" }
     ], (sessionID) => sessionID === "ses_a" ? [{ parts: [
       { id: "prt_t1", type: "tool", tool: "bash" },
-      { id: "prt_c1", type: "compaction", auto: true },
-      { id: "prt_s1", type: "step-finish" }
+      { id: "prt_c1", type: "compaction", reason: "auto" },
+      { id: "prt_s1", type: "step" }
     ] }] : []), state, "ses_root");
     expect(state.bySessionID["ses_a"]?.toolCalls).toBe(1);
     expect(state.bySessionID["ses_a"]?.autoCompacts).toBe(1);
@@ -61,6 +61,15 @@ describe("hydrateActivity", () => {
     const state = createActivityState();
     await hydrateActivity(makeClient([{ id: "ses_root" }, { id: "ses_a", parentID: "ses_root" }], () => [{ parts: [{ id: "prt_e1", type: "tool", tool: "bash", state: { status: "error", error: "command exited with code 1" } }] }]), state, "ses_root");
     expect(state.bySessionID["ses_a"]?.warnings).toBe(1);
+  });
+
+  test("hydrates v2 compaction reason and completed step parts without double counting", async () => {
+    const state = createActivityState();
+    await hydrateActivity(makeClient([{ id: "ses_root" }], () => [{ parts: [
+      { id: "cmp_1", type: "compaction", reason: "auto", status: "completed" },
+      { id: "step_1", type: "step", status: "completed" }
+    ] }]), state, "ses_root");
+    expect(state.bySessionID["ses_root"]).toMatchObject({ autoCompacts: 1, steps: 1 });
   });
 
   test("skips already hydrated sessions", async () => {
