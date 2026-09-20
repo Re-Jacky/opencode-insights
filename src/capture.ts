@@ -6,12 +6,10 @@ import { DEFAULT_PROMPT_RIGHT_METRICS, type PromptRightMetric } from "./metrics.
 import { parse, type ParseError } from "jsonc-parser";
 
 export type CaptureKind =
-  | "chat.message"
-  | "chat.params"
-  | "chat.headers"
-  | "experimental.chat.messages.transform"
-  | "experimental.chat.system.transform"
   | "event"
+  | "prompt"
+  | "context"
+  | "model.request"
   | "tool.execute.before"
   | "tool.execute.after";
 
@@ -83,23 +81,42 @@ function optionalString(value: unknown): string | undefined {
 
 function modelIDFrom(input: unknown): string | undefined {
   if (!isRecord(input)) return undefined;
-  return optionalString(input.modelID) ?? optionalString(input.id) ?? optionalString(input.name);
+  return optionalString(input.modelID) ?? optionalString(input.modelId) ?? optionalString(input.id) ?? optionalString(input.name);
 }
 
 function providerIDFrom(input: unknown): string | undefined {
   if (!isRecord(input)) return undefined;
   const info = isRecord(input.info) ? input.info : undefined;
-  return optionalString(info?.id) ?? optionalString(info?.name) ?? optionalString(input.id);
+  return optionalString(input.providerID) ?? optionalString(input.providerId) ?? optionalString(info?.id) ?? optionalString(info?.name) ?? optionalString(input.id);
 }
 
 function sessionIDFrom(input: unknown): string | undefined {
   if (!isRecord(input)) return undefined;
-  return optionalString(input.sessionID) ?? optionalString(input.sessionId);
+  return optionalString(input.sessionID) ?? optionalString(input.sessionId) ?? optionalString(input.id);
 }
 
 function messageIDFrom(input: unknown): string | undefined {
   if (!isRecord(input)) return undefined;
-  return optionalString(input.messageID) ?? optionalString(input.messageId);
+  return optionalString(input.messageID) ?? optionalString(input.messageId) ?? optionalString(input.id);
+}
+
+function nestedRecord(input: Record<string, unknown>, key: string) {
+  return isRecord(input[key]) ? input[key] : undefined;
+}
+
+function eventIdentifiers(event: unknown) {
+  const record = isRecord(event) ? event : {};
+  const session = nestedRecord(record, "session");
+  const message = nestedRecord(record, "message");
+  const model = nestedRecord(record, "model");
+  const nestedModel = model ? nestedRecord(model, "model") : undefined;
+  const provider = model ? nestedRecord(model, "provider") : undefined;
+  return {
+    sessionID: sessionIDFrom(record) ?? sessionIDFrom(session) ?? sessionIDFrom(message),
+    messageID: messageIDFrom(record) ?? messageIDFrom(message),
+    providerID: providerIDFrom(record) ?? providerIDFrom(model) ?? providerIDFrom(provider),
+    modelID: modelIDFrom(record) ?? modelIDFrom(model) ?? modelIDFrom(nestedModel)
+  };
 }
 
 function transformedMessages(output: unknown): Record<string, unknown>[] {
@@ -299,75 +316,27 @@ export function resolveCopilotToken(config: CopilotUsageConfig): string {
   }
 }
 
-export function normalizeChatMessageCapture(input: unknown, output: unknown, timestamp = Date.now()): CaptureRecord {
-  const inputRecord = isRecord(input) ? input : {};
-  const model = isRecord(inputRecord.model) ? inputRecord.model : undefined;
+function normalizeV2Capture(kind: Exclude<CaptureKind, "event">, event: unknown, timestamp = Date.now()): CaptureRecord {
+  const identifiers = eventIdentifiers(event);
   return captureRecord({
     id: nextID(timestamp),
-    kind: "chat.message",
+    kind,
     timestamp,
-    sessionID: sessionIDFrom(inputRecord),
-    messageID: messageIDFrom(inputRecord),
-    providerID: model ? optionalString(model.providerID) : undefined,
-    modelID: model ? optionalString(model.modelID) : undefined,
-    payload: { input, output }
+    ...identifiers,
+    payload: { event }
   });
 }
 
-export function normalizeChatParamsCapture(input: unknown, output: unknown, timestamp = Date.now()): CaptureRecord {
-  const inputRecord = isRecord(input) ? input : {};
-  return captureRecord({
-    id: nextID(timestamp),
-    kind: "chat.params",
-    timestamp,
-    sessionID: sessionIDFrom(inputRecord),
-    messageID: messageIDFrom(inputRecord.message),
-    providerID: providerIDFrom(inputRecord.provider),
-    modelID: modelIDFrom(inputRecord.model),
-    payload: { input, output }
-  });
+export function normalizePromptCapture(event: unknown, timestamp = Date.now()): CaptureRecord {
+  return normalizeV2Capture("prompt", event, timestamp);
 }
 
-export function normalizeChatHeadersCapture(input: unknown, output: unknown, timestamp = Date.now()): CaptureRecord {
-  const inputRecord = isRecord(input) ? input : {};
-  return captureRecord({
-    id: nextID(timestamp),
-    kind: "chat.headers",
-    timestamp,
-    sessionID: sessionIDFrom(inputRecord),
-    messageID: messageIDFrom(inputRecord.message),
-    providerID: providerIDFrom(inputRecord.provider),
-    modelID: modelIDFrom(inputRecord.model),
-    payload: { input, output }
-  });
+export function normalizeContextCapture(event: unknown, timestamp = Date.now()): CaptureRecord {
+  return normalizeV2Capture("context", event, timestamp);
 }
 
-export function normalizeExperimentalChatMessagesTransformCapture(input: unknown, output: unknown, timestamp = Date.now()): CaptureRecord {
-  const inputRecord = isRecord(input) ? input : {};
-  const latestUserMessage = latestUserTransformedMessage(output);
-  const info = infoFromTransformedMessage(latestUserMessage);
-  return captureRecord({
-    id: nextID(timestamp),
-    kind: "experimental.chat.messages.transform",
-    timestamp,
-    sessionID: sessionIDFrom(inputRecord),
-    messageID: messageIDFrom(info) ?? optionalString(info?.id),
-    payload: { input, output }
-  });
-}
-
-export function normalizeExperimentalChatSystemTransformCapture(input: unknown, output: unknown, timestamp = Date.now()): CaptureRecord {
-  const inputRecord = isRecord(input) ? input : {};
-  const model = isRecord(inputRecord.model) ? inputRecord.model : undefined;
-  return captureRecord({
-    id: nextID(timestamp),
-    kind: "experimental.chat.system.transform",
-    timestamp,
-    sessionID: sessionIDFrom(inputRecord),
-    providerID: model ? optionalString(model.providerID) : undefined,
-    modelID: model ? modelIDFrom(model) : undefined,
-    payload: { input, output }
-  });
+export function normalizeModelRequestCapture(event: unknown, timestamp = Date.now()): CaptureRecord {
+  return normalizeV2Capture("model.request", event, timestamp);
 }
 
 export function normalizeEventCapture(event: unknown, timestamp = Date.now()): CaptureRecord {
@@ -387,18 +356,10 @@ export function normalizeEventCapture(event: unknown, timestamp = Date.now()): C
 
 export function normalizeToolCapture(
   kind: "tool.execute.before" | "tool.execute.after",
-  input: unknown,
-  output: unknown,
+  event: unknown,
   timestamp = Date.now()
 ): CaptureRecord {
-  const inputRecord = isRecord(input) ? input : {};
-  return captureRecord({
-    id: nextID(timestamp),
-    kind,
-    timestamp,
-    sessionID: sessionIDFrom(inputRecord),
-    payload: { input, output }
-  });
+  return normalizeV2Capture(kind, event, timestamp);
 }
 
 export class JsonlCaptureStore implements CaptureStore {

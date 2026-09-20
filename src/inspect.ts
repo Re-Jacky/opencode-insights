@@ -178,7 +178,6 @@ export function buildRequestHistory(records: CaptureRecord[]): RequestHistory {
   const responses = new Map<string, HistoryResponse>();
   const responsesByParent = new Map<string, HistoryResponse[]>();
   const requests: HistoryRequest[] = [];
-  const pendingSystemTransforms: HistoryRequest[] = [];
 
   const getSession = (sessionID: string): HistorySession => {
     const existing = sessions.get(sessionID);
@@ -239,8 +238,8 @@ export function buildRequestHistory(records: CaptureRecord[]): RequestHistory {
   for (const record of records.slice().sort((a, b) => a.timestamp - b.timestamp || a.id.localeCompare(b.id))) {
     if (record.sessionID) getSession(record.sessionID);
 
-    if (record.kind === "chat.message") {
-      const message = historyMessageFromChatMessage(record);
+    if (record.kind === "prompt") {
+      const message = historyMessageFromPrompt(record);
       if (message) {
         const existing = getMessage(message.sessionID, message.id, message.role);
         existing.createdAt = message.createdAt ?? existing.createdAt;
@@ -248,21 +247,24 @@ export function buildRequestHistory(records: CaptureRecord[]): RequestHistory {
       }
     }
 
-    if (record.kind === "chat.params" || record.kind === "experimental.chat.messages.transform" || record.kind === "experimental.chat.system.transform") {
+    if (record.kind === "context" || record.kind === "model.request") {
       const request = historyRequestFromCapture(record);
       if (!request.messageID && request.sessionID) {
         request.messageID = latestUserMessageBefore(messages, request.sessionID, request.timestamp)?.id;
       }
-      if (record.kind === "experimental.chat.system.transform") {
-        pendingSystemTransforms.push(request);
-      } else {
-        attachPendingSystemTransform(pendingSystemTransforms, request);
-        addRequest(request);
+      const event = isRecord(record.payload.event) ? record.payload.event : {};
+      if (record.kind === "context" && Array.isArray(event.system)) {
+        request.system = { id: record.id, timestamp: record.timestamp, payload: record.payload };
       }
+      if (record.kind === "model.request") {
+        request.headers = { id: record.id, timestamp: record.timestamp, payload: record.payload };
+      }
+      addRequest(request);
     }
 
-    if (record.kind === "chat.headers") {
-      attachHeadersToRequest(requests, record);
+    if (record.kind === "tool.execute.before" || record.kind === "tool.execute.after") {
+      const response = record.sessionID && record.messageID ? responses.get(`${record.sessionID}:${record.messageID}`) : undefined;
+      response?.events.push(record.payload);
     }
 
     if (record.kind !== "event") continue;
@@ -332,8 +334,6 @@ export function buildRequestHistory(records: CaptureRecord[]): RequestHistory {
     }
   }
 
-  for (const request of pendingSystemTransforms) addRequest(request);
-
   for (const session of sessions.values()) {
     for (const message of session.messages) {
       const messageResponses = (responsesByParent.get(`${message.sessionID}:${message.id}`) ?? []).sort(
@@ -343,7 +343,6 @@ export function buildRequestHistory(records: CaptureRecord[]): RequestHistory {
 
       let responseIndex = 0;
       for (const request of message.requests.slice().sort((a, b) => a.timestamp - b.timestamp)) {
-        if (!requestShouldOwnAssistantResponse(request)) continue;
         request.response = messageResponses[responseIndex] ?? message.response;
         if (responseIndex < messageResponses.length) responseIndex += 1;
       }
@@ -443,11 +442,9 @@ function recentCaptureSql(limit: number) {
           where id in (
             select id from captures
             where kind in (
-              'chat.params',
-              'chat.message',
-              'chat.headers',
-              'experimental.chat.messages.transform',
-              'experimental.chat.system.transform'
+              'prompt',
+              'context',
+              'model.request'
             )
             order by timestamp desc
             limit ${limit}
@@ -473,9 +470,9 @@ function viewerCaptureSql(limit: number) {
             select id, session_id
             from captures
             where kind in (
-              'chat.params',
-              'chat.message',
-              'experimental.chat.system.transform'
+              'prompt',
+              'context',
+              'model.request'
             )
             order by timestamp desc
             limit ${limit}
@@ -526,7 +523,7 @@ function viewerCaptureSql(limit: number) {
 }
 
 function isViewerCaptureKind(kind: CaptureRecord["kind"]) {
-  return kind === "chat.params" || kind === "chat.message" || kind === "experimental.chat.system.transform" || kind === "event";
+  return kind === "prompt" || kind === "context" || kind === "model.request" || kind === "event";
 }
 
 function dedupeRows(rows: SqliteRow[]) {
@@ -560,65 +557,19 @@ function optionalString(value: unknown): string | undefined {
 }
 
 function historyRequestFromCapture(record: CaptureRecord): HistoryRequest {
-  const input = isRecord(record.payload.input) ? record.payload.input : {};
-  const agent = agentFromCapture(record, input);
+  const event = isRecord(record.payload.event) ? record.payload.event : {};
   return {
     id: record.id,
     sessionID: record.sessionID,
-    messageID: messageIDForCapture(record, input),
+    messageID: record.messageID,
     timestamp: record.timestamp,
-    agent,
-    purpose: purposeFromAgent(agent),
+    agent: optionalString(event.agent),
+    purpose: record.kind === "context" ? "Prepare model context for this message." : "Dispatch a provider model request for this message.",
     providerID: record.providerID,
     modelID: record.modelID,
     summary: summarizePayload(record.payload),
     payload: record.payload
   };
-}
-
-function requestShouldOwnAssistantResponse(request: HistoryRequest) {
-  return request.agent !== "title";
-}
-
-function purposeFromAgent(agent: string | undefined) {
-  if (agent === "title") return "Generate or update the session title. This is not the assistant reply shown in the conversation.";
-  if (agent === "build") return "Generate the assistant response for the user message.";
-  if (agent === "messages.transform") return "Capture the final conversation messages OpenCode prepared before model execution.";
-  if (agent === "system.transform") return "Capture the system prompt strings OpenCode prepared before model execution.";
-  if (agent) return `Run the ${agent} agent for this message.`;
-  return "Run an OpenCode model request for this message.";
-}
-
-function agentFromCapture(record: CaptureRecord, input: Record<string, unknown>) {
-  if (record.kind === "experimental.chat.messages.transform") return "messages.transform";
-  if (record.kind === "experimental.chat.system.transform") return "system.transform";
-  return optionalString(input.agent);
-}
-
-function messageIDForCapture(record: CaptureRecord, input: Record<string, unknown>) {
-  return record.messageID ?? messageIDFromPayload(input.message);
-}
-
-function attachPendingSystemTransform(pendingSystemTransforms: HistoryRequest[], request: HistoryRequest) {
-  let index = -1;
-  for (let candidateIndex = pendingSystemTransforms.length - 1; candidateIndex >= 0; candidateIndex -= 1) {
-    const candidate = pendingSystemTransforms[candidateIndex];
-    if (
-      candidate &&
-      candidate.sessionID === request.sessionID &&
-      candidate.providerID === request.providerID &&
-      candidate.modelID === request.modelID &&
-      candidate.timestamp <= request.timestamp &&
-      request.timestamp - candidate.timestamp <= 5_000
-    ) {
-      index = candidateIndex;
-      break;
-    }
-  }
-  if (index < 0) return;
-  const [system] = pendingSystemTransforms.splice(index, 1);
-  if (!system) return;
-  request.system = { id: system.id, timestamp: system.timestamp, payload: system.payload };
 }
 
 function latestUserMessageBefore(messages: Map<string, HistoryMessage>, sessionID: string, timestamp: number) {
@@ -632,58 +583,25 @@ function latestUserMessageBefore(messages: Map<string, HistoryMessage>, sessionI
 }
 
 function summarizePayload(payload: Record<string, unknown>) {
-  const input = isRecord(payload.input) ? payload.input : {};
-  const message = isRecord(input.message) ? input.message : {};
-  const text = textFromMessagePayload(message) ?? findFirstString(input, ["prompt", "input"]);
+  const event = isRecord(payload.event) ? payload.event : {};
+  const text = findFirstString(event, ["text", "prompt", "input"]);
   if (!text) return "LLM request";
   return text.replace(/\s+/g, " ").trim().slice(0, 160);
 }
 
-function historyMessageFromChatMessage(record: CaptureRecord): HistoryMessage | undefined {
-  const output = isRecord(record.payload.output) ? record.payload.output : {};
-  const message = isRecord(output.message) ? output.message : {};
-  const sessionID = record.sessionID ?? optionalString(message.sessionID);
-  const messageID = optionalString(message.id);
+function historyMessageFromPrompt(record: CaptureRecord): HistoryMessage | undefined {
+  const event = isRecord(record.payload.event) ? record.payload.event : {};
+  const sessionID = record.sessionID;
+  const messageID = record.messageID;
   if (!sessionID || !messageID) return undefined;
   return {
     id: messageID,
     sessionID,
-    role: optionalString(message.role) ?? "user",
-    createdAt: numberFromPath(message.time, "created") ?? record.timestamp,
-    completedAt: numberFromPath(message.time, "completed"),
-    text: textFromChatMessageOutput(output),
+    role: "user",
+    createdAt: record.timestamp,
+    text: findFirstString(event, ["text", "prompt"]) ?? textFromMessagePayload(event) ?? "",
     requests: []
   };
-}
-
-function attachHeadersToRequest(requests: HistoryRequest[], record: CaptureRecord) {
-  const input = isRecord(record.payload.input) ? record.payload.input : {};
-  const agent = optionalString(input.agent);
-  const messageID = record.messageID ?? messageIDFromPayload(input.message);
-  const match = requests
-    .slice()
-    .reverse()
-    .find((request) => {
-      return (
-        request.sessionID === record.sessionID &&
-        request.messageID === messageID &&
-        request.agent === agent &&
-        request.providerID === record.providerID &&
-        request.modelID === record.modelID &&
-        request.timestamp <= record.timestamp &&
-        !request.headers
-      );
-    });
-  if (!match) return;
-  match.headers = { id: record.id, timestamp: record.timestamp, payload: record.payload };
-}
-
-function textFromChatMessageOutput(output: Record<string, unknown>) {
-  const parts = Array.isArray(output.parts) ? output.parts : [];
-  return parts
-    .map((part) => (isRecord(part) ? optionalString(part.text) ?? optionalString(part.content) : undefined))
-    .filter((text): text is string => !!text)
-    .join("\n");
 }
 
 function textFromMessagePayload(message: Record<string, unknown>) {
@@ -695,10 +613,6 @@ function textFromMessagePayload(message: Record<string, unknown>) {
     .filter((text): text is string => !!text)
     .join("\n");
   return joined || undefined;
-}
-
-function messageIDFromPayload(message: unknown) {
-  return isRecord(message) ? optionalString(message.id) ?? optionalString(message.messageID) ?? optionalString(message.messageId) : undefined;
 }
 
 function findFirstString(value: Record<string, unknown>, keys: string[]) {
