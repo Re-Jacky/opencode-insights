@@ -16,6 +16,12 @@ describe("hydrateActivity", () => {
     expect(state.bySessionID["ses_root"]?.toolCalls).toBe(1);
   });
 
+  test("preserves the v2 tool name and activity breakdown during hydration", async () => {
+    const state = createActivityState();
+    await hydrateActivity(makeClient([{ id: "ses_root" }], () => [{ parts: [{ id: "prt_t1", type: "tool", tool: "bash", state: { status: "completed" } }] }]), state, "ses_root");
+    expect(state.bySessionID["ses_root"]?.toolBreakdown).toEqual({ bash: 1 });
+  });
+
   test("seeds childrenByParent and titles", async () => {
     const state = createActivityState();
     await hydrateActivity(makeClient([
