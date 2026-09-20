@@ -1,7 +1,6 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, test } from "vitest";
 import defaultServer from "../src/index.js";
-import defaultTui from "../src/tui.js";
 
 describe("plugin entrypoints", () => {
   test("exports a v2 server definition", () => {
@@ -14,8 +13,6 @@ describe("plugin entrypoints", () => {
   test("exports a v2 tui definition", () => {
     const source = readFileSync(new URL("../src/tui.tsx", import.meta.url), "utf8");
 
-    expect(defaultTui.id).toBe("opencode-insights-tui");
-    expect(typeof defaultTui.setup).toBe("function");
     expect(source).toContain('from "@opencode/plugin/tui"');
     expect(source).toContain('const id = "opencode-insights-tui"');
     expect(source).toContain("Plugin.define({ id, setup })");

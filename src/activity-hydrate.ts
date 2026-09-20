@@ -2,8 +2,10 @@ import { recordChild, recordCompaction, recordStep, recordToolPart, type Activit
 
 export type ActivityClient = {
   session: {
-    list(input: { limit?: number }): Promise<{ data?: Array<{ id: string; parentID?: string; title?: string }> }>;
-    messages(input: { sessionID: string }): Promise<{ data?: Array<{ parts?: Array<Record<string, unknown>> }> }>;
+    list(): Array<{ id: string; parentID?: string; title?: string }>;
+  };
+  message: {
+    list(sessionID: string): Array<{ parts?: Array<Record<string, unknown>> }>;
   };
 };
 
@@ -70,8 +72,7 @@ export async function hydrateActivity(client: ActivityClient, state: ActivitySta
   if (!isSessionID(rootSessionID)) return;
   let sessions: Array<{ id: string; parentID?: string; title?: string }> = [];
   try {
-    const response = await client.session.list({ limit: LIST_LIMIT });
-    sessions = response.data ?? [];
+    sessions = client.session.list().slice(0, LIST_LIMIT);
   } catch {
     return; // degrade to live-only data
   }
@@ -86,8 +87,7 @@ export async function hydrateActivity(client: ActivityClient, state: ActivitySta
   for (const sessionID of toHydrate) state.loading.add(sessionID);
   await mapConcurrent(toHydrate, CONCURRENCY_LIMIT, async (sessionID) => {
     try {
-      const response = await client.session.messages({ sessionID });
-      const messages = response.data ?? [];
+      const messages = client.message.list(sessionID);
       for (const message of messages) {
         if (message.parts && message.parts.length > 0) {
           applyParts(state, sessionID, message.parts);
