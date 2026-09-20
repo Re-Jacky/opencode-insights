@@ -34,6 +34,7 @@ export type InsightsOptions = {
   dataDir?: unknown;
   dbPath?: unknown;
   retentionDays?: unknown;
+  cliShim?: unknown;
 };
 
 export type GoUsageConfig = {
