@@ -67,8 +67,10 @@ OpenCode Insights viewer listening at http://127.0.0.1:8765
 ## Uninstall
 
 Remove this package from the `plugins` array in `opencode.json` / `opencode.jsonc`.
-The command removes the package from `opencode.json(c)` and deletes the local
-Insights database files:
+The command removes the package from `opencode.json(c)`, cleans stale Insights
+entries from global `cli.json(c)` and legacy `tui.json(c)` files, and deletes
+the local Insights database files. It never adds the official package to those
+auxiliary files:
 
 ```bash
 opencode-insights uninstall

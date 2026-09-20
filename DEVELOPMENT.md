@@ -27,8 +27,10 @@ The plugin belongs in the `plugins` array in `opencode.json(c)`:
 ```
 
 Do not add a second TUI entry. `cli.json(c)` is reserved for CLI-only plugins;
-Insights does not write or require it. The `debug` and `revert` commands update
-only the main OpenCode configuration.
+Insights does not write or require it. The `debug` and `revert` commands add or
+revert the combined package only in the main OpenCode configuration. `revert`
+and `uninstall` also remove stale Insights entries from global `cli.json(c)` and
+legacy `tui.json(c)` files without adding the package to those auxiliary files.
 
 ## Runtime Data
 

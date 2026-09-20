@@ -137,9 +137,7 @@ describe("plugin entrypoints", () => {
       "api.route.navigate",
       "api.lifecycle.onDispose",
       /\bconfig\.plugin\b/u,
-      /(?:chat\.message|chat\.params|chat\.headers|experimental\.chat)/u,
-      "tui.json",
-      "Legacy TUI"
+      /(?:chat\.message|chat\.params|chat\.headers|experimental\.chat)/u
     ];
 
     for (const pattern of forbidden) {

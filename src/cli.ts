@@ -15,6 +15,7 @@ const execFileAsync = promisify(execFile);
 const DEFAULT_RECENT_LIMIT = 20;
 const DEFAULT_HISTORY_LIMIT = 5_000;
 const SERVER_PLUGIN_SPEC = "@rejacky/opencode-insights";
+const SUBPATH_TUI_PLUGIN_SPEC = "@rejacky/opencode-insights/tui";
 
 type CliOptions = {
   dbPath?: string | undefined;
@@ -343,15 +344,25 @@ export async function configureOpenCodeDebug(options: CliOptions) {
 export async function revertOpenCodeDebug(options: CliOptions) {
   const configDir = options.configDir ?? defaultOpenCodeConfigDir();
   const opencodePath = resolveOpenCodeConfigPath(configDir);
+  const cliPath = resolveOptionalConfigPath(configDir, "cli");
+  const tuiPath = resolveOptionalConfigPath(configDir, "tui");
   const officialSpec = `${SERVER_PLUGIN_SPEC}@latest`;
 
-  const result = await revertPluginToOfficial(opencodePath, officialSpec, options, "plugins");
-  const changed = result.startsWith("replaced");
+  const [result, cliResult, tuiResult] = await Promise.all([
+    revertPluginToOfficial(opencodePath, officialSpec, options, "plugins"),
+    removeInsightsFromConfig(cliPath, options),
+    removeInsightsFromConfig(tuiPath, options)
+  ]);
+  const changed = [result, cliResult, tuiResult].some((item) => item.startsWith("replaced") || item.startsWith("removed"));
 
   const lines = [
     `OpenCode config: ${opencodePath}`,
+    `CLI config: ${cliPath}`,
+    `TUI config: ${tuiPath}`,
     `Official plugin spec: ${officialSpec}`,
-    `Plugin: ${result}`
+    `Plugin: ${result}`,
+    `CLI cleanup: ${cliResult}`,
+    `TUI cleanup: ${tuiResult}`
   ];
 
   if (options.dryRun) {
@@ -362,6 +373,19 @@ export async function revertOpenCodeDebug(options: CliOptions) {
     lines.push("No local build output found; nothing to revert.");
   }
   return lines.join("\n");
+}
+
+async function removeInsightsFromConfig(path: string, options: CliOptions) {
+  if (!existsSync(path)) return "config not found";
+  const source = await readJsonConfigSource(path);
+  const config = await readJsonConfig(path, { plugins: [] }, source);
+  const current = Array.isArray(config.plugins) ? config.plugins : [];
+  const next = current.filter((entry) => !isInsightsPluginEntry(entry));
+  if (next.length === current.length) return "not present (stale Insights entry)";
+  config.plugins = next;
+  if (options.dryRun) return "would remove stale Insights entries";
+  await writeJsonConfig(path, config, source);
+  return "removed stale Insights entries";
 }
 
 async function revertPluginToOfficial(path: string, officialSpec: string, options: CliOptions, key: "plugins") {
@@ -498,7 +522,7 @@ function pluginSpec(entry: unknown): string | undefined {
 }
 
 function isInsightsSpec(spec: string): boolean {
-  if (spec === SERVER_PLUGIN_SPEC) return true;
+  if (spec === SERVER_PLUGIN_SPEC || spec === SUBPATH_TUI_PLUGIN_SPEC) return true;
   if (spec.startsWith("npm:")) return isInsightsSpec(spec.slice(4));
   if (spec.startsWith(`${SERVER_PLUGIN_SPEC}@`)) return true;
   const normalized = spec.replaceAll("\\", "/");
@@ -508,17 +532,27 @@ function isInsightsSpec(spec: string): boolean {
 export async function uninstallOpenCode(options: CliOptions) {
   const configDir = options.configDir ?? defaultOpenCodeConfigDir();
   const opencodePath = resolveOpenCodeConfigPath(configDir);
+  const cliPath = resolveOptionalConfigPath(configDir, "cli");
+  const tuiPath = resolveOptionalConfigPath(configDir, "tui");
   const dbPath = resolveCapturePath(options);
   const jsonlPath = dbPath.endsWith(".sqlite") ? `${dbPath}.jsonl` : dbPath;
 
   const lines = [
     `OpenCode config: ${opencodePath}`,
+    `CLI config: ${cliPath}`,
+    `TUI config: ${tuiPath}`,
     `DB path: ${dbPath}`,
     `JSONL fallback path: ${jsonlPath}`
   ];
 
-  const result = await removePluginFromConfig(opencodePath, SERVER_PLUGIN_SPEC, options);
+  const [result, cliResult, tuiResult] = await Promise.all([
+    removePluginFromConfig(opencodePath, SERVER_PLUGIN_SPEC, options),
+    removeInsightsFromConfig(cliPath, options),
+    removeInsightsFromConfig(tuiPath, options)
+  ]);
   lines.push(`Plugin: ${result}`);
+  lines.push(`CLI cleanup: ${cliResult}`);
+  lines.push(`TUI cleanup: ${tuiResult}`);
 
   if (options.keepData) {
     lines.push("Data cleanup: skipped (--keep-data).");
@@ -570,6 +604,13 @@ async function writeJsonConfig(path: string, config: JsonObject, source?: string
     return;
   }
   await writeFile(path, `${JSON.stringify(config, null, 2)}\n`, "utf8");
+}
+
+function resolveOptionalConfigPath(configDir: string, name: "cli" | "tui") {
+  const jsoncPath = join(configDir, `${name}.jsonc`);
+  if (existsSync(jsoncPath)) return jsoncPath;
+  const jsonPath = join(configDir, `${name}.json`);
+  return existsSync(jsonPath) ? jsonPath : jsoncPath;
 }
 
 function usage() {

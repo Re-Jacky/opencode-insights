@@ -45,7 +45,55 @@ describe("CLI v2 configuration", () => {
       );
       await uninstallOpenCode(options(dir));
       const config = JSON.parse(await readFile(join(dir, "opencode.json"), "utf8")) as { plugins: unknown[] };
-      expect(config.plugins).toEqual(["keep", { package: "@rejacky/opencode-insights/tui", options: { enabled: true } }, { package: "other-plugin", options: {} }]);
+      expect(config.plugins).toEqual(["keep", { package: "other-plugin", options: {} }]);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("uninstall removes stale entries from cli.jsonc and legacy tui.json without adding packages", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "opencode-insights-test-"));
+    try {
+      await writeFile(join(dir, "opencode.json"), '{"plugins": ["existing"]}\n', "utf8");
+      await writeFile(join(dir, "cli.jsonc"), '{\n  // Keep this comment.\n  "plugins": ["@rejacky/opencode-insights", "cli-other"]\n}\n', "utf8");
+      await writeFile(join(dir, "tui.json"), JSON.stringify({ plugins: [{ package: "@rejacky/opencode-insights/tui", options: { old: true } }, "tui-other"] }) + "\n", "utf8");
+
+      const output = await uninstallOpenCode(options(dir));
+
+      const cliText = await readFile(join(dir, "cli.jsonc"), "utf8");
+      const cli = JSON.parse(stripJsonCommentsAndTrailingCommas(cliText)) as { plugins: unknown[] };
+      const tui = JSON.parse(await readFile(join(dir, "tui.json"), "utf8")) as { plugins: unknown[] };
+      expect(output).toContain("CLI config");
+      expect(output).toContain("TUI config");
+      expect(cli.plugins).toEqual(["cli-other"]);
+      expect(tui.plugins).toEqual(["tui-other"]);
+      expect(await readFile(join(dir, "opencode.json"), "utf8")).toContain('"existing"');
+      expect(cli.plugins).not.toContain("@rejacky/opencode-insights");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("revert removes stale entries from cli.json and legacy tui.jsonc without adding the official package", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "opencode-insights-test-"));
+    try {
+      await writeFile(join(dir, "opencode.json"), '{"plugins": ["/tmp/opencode-insights/dist/index.js"]}\n', "utf8");
+      await writeFile(join(dir, "cli.json"), JSON.stringify({ plugins: [{ package: "@rejacky/opencode-insights", options: {} }, "cli-other"] }) + "\n", "utf8");
+      await writeFile(join(dir, "tui.jsonc"), '{\n  // TUI comment.\n  "plugins": ["@rejacky/opencode-insights/tui", "tui-other"]\n}\n', "utf8");
+
+      const output = await revertOpenCodeDebug(options(dir));
+
+      const main = JSON.parse(await readFile(join(dir, "opencode.json"), "utf8")) as { plugins: unknown[] };
+      const cli = JSON.parse(await readFile(join(dir, "cli.json"), "utf8")) as { plugins: unknown[] };
+      const tuiText = await readFile(join(dir, "tui.jsonc"), "utf8");
+      const tui = JSON.parse(stripJsonCommentsAndTrailingCommas(tuiText)) as { plugins: unknown[] };
+      expect(output).toContain("CLI config");
+      expect(output).toContain("TUI config");
+      expect(main.plugins).toEqual(["@rejacky/opencode-insights@latest"]);
+      expect(cli.plugins).toEqual(["cli-other"]);
+      expect(tui.plugins).toEqual(["tui-other"]);
+      expect(cli.plugins).not.toContain("@rejacky/opencode-insights@latest");
+      expect(tuiText).toContain("TUI comment");
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
