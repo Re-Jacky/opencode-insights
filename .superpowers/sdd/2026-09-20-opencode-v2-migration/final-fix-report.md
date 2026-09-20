@@ -42,18 +42,55 @@ Recorded after the fix-wave commit.
 
 ```text
 npm test -- test/tui.test.ts test/entrypoints.test.ts test/plugin.test.ts
-Test Files  3 passed (3)
-Tests       20 passed (20)
+> @rejacky/opencode-insights@0.4.1 test
+> vitest run test/tui.test.ts test/entrypoints.test.ts test/plugin.test.ts
+
+ RUN  v4.1.10 /Users/zyao/Desktop/opencode-insights
+
+ Test Files  3 passed (3)
+ Tests       20 passed (20)
 
 npm run typecheck
-tsc --noEmit
+> @rejacky/opencode-insights@0.4.1 typecheck
+> tsc --noEmit
 
 npm run verify
-Test Files  14 passed (14)
-Tests       176 passed (176)
-ESM Build success
-DTS Build success
+> @rejacky/opencode-insights@0.4.1 verify
+> npm run typecheck && npm run test && npm run build
 
+> @rejacky/opencode-insights@0.4.1 typecheck
+> tsc --noEmit
+
+> @rejacky/opencode-insights@0.4.1 test
+> vitest run
+
+ RUN  v4.1.10 /Users/zyao/Desktop/opencode-insights
+
+Test Files  3 passed (3)
+Tests       20 passed (20)
+ Test Files  14 passed (14)
+ Tests       176 passed (176)
+> @rejacky/opencode-insights@0.4.1 build
+> tsup
+CLI Building entry: {"index":"src/index.ts","tui":"src/tui.tsx","cli":"src/cli.ts"}
+CLI Using tsconfig: tsconfig.json
+CLI tsup v8.5.1
+CLI Using tsup config: /Users/zyao/Desktop/opencode-insights/tsup.config.ts
+CLI Target: es2022
+CLI Cleaning output folder
+ESM Build start
+ESM dist/index.js          3.84 KB
+ESM dist/tui.js            27.01 KB
+ESM dist/chunk-4GSWCCSB.js 22.81 KB
+ESM dist/chunk-CNNYQGRZ.js 31.43 KB
+ESM dist/cli.js            75.06 KB
+ESM ⚡️ Build success in 10ms
+DTS Build start
+DTS ⚡️ Build success in 1647ms
+DTS dist/cli.d.ts              3.47 KB
+DTS dist/index.d.ts            4.21 KB
+DTS dist/tui.d.ts              301.00 B
+DTS dist/capture-CQqhKpP_.d.ts 8.08 KB
 git diff --check
 passed
 ```
