@@ -362,8 +362,8 @@ export async function revertOpenCodeDebug(options: CliOptions) {
   const officialSpec = `${SERVER_PLUGIN_SPEC}@latest`;
 
   const serverResult = await revertPluginToOfficial(opencodePath, officialSpec, options, "plugins");
-  const cliResult = await revertPluginToOfficial(cliPath, officialSpec, options, "plugins");
-  const tuiResult = await revertPluginToOfficial(tuiPath, officialSpec, options, "plugins");
+  const cliResult = await removeInsightsFromConfig(cliPath, options);
+  const tuiResult = await removeInsightsFromConfig(tuiPath, options);
   const changed = [serverResult, cliResult, tuiResult].some((result) => result.startsWith("replaced"));
 
   const lines = [
@@ -402,6 +402,19 @@ async function revertPluginToOfficial(path: string, officialSpec: string, option
   if (options.dryRun) return `would replace local build with ${officialSpec}`;
   await writeJsonConfig(path, config, source);
   return `replaced local build with ${officialSpec}`;
+}
+
+async function removeInsightsFromConfig(path: string, options: CliOptions) {
+  if (!existsSync(path)) return "config not found";
+  const source = await readJsonConfigSource(path);
+  const config = await readJsonConfig(path, { plugins: [] }, source);
+  const current = Array.isArray(config.plugins) ? config.plugins : [];
+  const next = current.filter((entry) => !isInsightsPluginEntry(entry));
+  if (next.length === current.length) return "not present (local build output)";
+  config.plugins = next;
+  if (options.dryRun) return "would remove stale Insights entries";
+  await writeJsonConfig(path, config, source);
+  return "removed stale Insights entries";
 }
 
 function isLocalDistEntry(entry: unknown): boolean {
@@ -597,7 +610,10 @@ async function removePluginFromConfig(path: string, plugin: string, options: Cli
   if (!existsSync(path)) return "config not found";
   const source = await readJsonConfigSource(path);
   const config = await readJsonConfig(path, { plugins: [] }, source);
-  const changed = removePlugin(config, plugin);
+  const current = Array.isArray(config.plugins) ? config.plugins : [];
+  const next = current.filter((entry) => !isInsightsSpec(pluginSpec(entry) ?? ""));
+  const changed = next.length !== current.length;
+  config.plugins = next;
   if (!changed) return `not present (${plugin})`;
   if (options.dryRun) return `would remove (${plugin})`;
   await writeJsonConfig(path, config, source);
