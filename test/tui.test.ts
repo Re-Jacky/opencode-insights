@@ -51,6 +51,13 @@ describe("v2 TUI contract", () => {
     expect(source).toContain("goTracker.record");
     expect(source).toContain("copilotTracker.record");
     expect(source).toContain("context.data.session.message.list");
+    expect(source).toContain("data.reason === \"auto\"");
+    expect(source).toContain("session.usage.updated");
+    expect(source).toContain("data.tokens");
+    expect(source).toContain("textFromToolContent");
+    expect(source).toContain("go.refresh()");
+    expect(source).toContain("copilot.refresh()");
+    expect(source).toContain("createEffect");
   });
 
   test("preserves v2 subagent and activity state when events are normalized", () => {
@@ -72,5 +79,15 @@ describe("v2 TUI contract", () => {
     expect(source).toContain("return async () =>");
     expect(source).toContain("disposed");
     expect(source).toContain("context.ui.dialog.show");
+  });
+
+  test("uses a v2 context harness shape for setup lifecycle coverage", () => {
+    const source = readFileSync(new URL("../src/tui.tsx", import.meta.url), "utf8");
+    expect(source).toContain('context.data.on("session.status"');
+    expect(source).toContain("context.data.listen");
+    expect(source).toContain('append: "prompt.footer.status"');
+    expect(source).toContain('append: "sidebar.content"');
+    expect(source).toContain("cleanups.push(...slotCleanups)");
+    expect(source).toContain("for (const cleanup of cleanups) cleanup()");
   });
 });

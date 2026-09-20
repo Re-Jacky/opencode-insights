@@ -46,3 +46,22 @@
 ## Round 1 Commit
 
 `39a3a81` contains the implementation and initial round-1 report; the runtime coverage follow-up is committed separately after verification.
+
+## Round 2 Fix
+
+- Restored Go/Copilot refresh effects when provider visibility is detected, with completion notifications invalidating the sidebar render state. Session-created events now read the v2 `data.model.providerID` shape.
+- Added explicit Solid signal reads in prompt, analysis, token, and sidebar render computations so listener notifications produce actual rerenders rather than setter-only updates.
+- Corrected `session.usage.updated` handling to associate aggregate v2 `data.tokens` with the latest assistant message in the session.
+- Switched automatic compaction detection to `data.reason === "auto"`.
+- Preserved v2 failed-tool structured error messages and tool content in activity warning details.
+- Added a build-before-test runtime v2 context harness that invokes setup, captures both slot registrations, dispatches representative `session.created` and `session.status` events, and verifies listener/slot cleanup is idempotent.
+
+## Round 2 Verification
+
+- `npm test -- test/tui.test.ts test/activity-hydrate.test.ts test/entrypoints.test.ts`: PASS, 3 files, 21 tests.
+- `npm run typecheck`: PASS.
+- `npm run verify`: PASS, 14 test files, 187 tests; typecheck and ESM/declaration build passed.
+
+## Round 2 Commit
+
+Pending commit creation.
