@@ -18,8 +18,8 @@ describe("capture inspection", () => {
 
   test("reconstructs v2 prompt context requests and tool activity in order", () => {
     const records = [
-      { id: "session", kind: "event" as const, timestamp: 1_000, sessionID: "ses_1", payload: { event: {
-        type: "session.updated", properties: { info: { id: "ses_1", title: "Demo", time: { updated: 1_000 } } }
+       { id: "session", kind: "event" as const, timestamp: 1_000, sessionID: "ses_1", payload: { event: {
+         type: "session.updated", id: "evt_session", created: 1_000, data: { info: { id: "ses_1", title: "Demo", time: { updated: 1_000 } } }
       } } },
       { id: "prompt", kind: "prompt" as const, timestamp: 1_100, sessionID: "ses_1", messageID: "msg_user", payload: { event: {
         sessionID: "ses_1", messageID: "msg_user", text: "hello model", agent: "build"
@@ -32,11 +32,11 @@ describe("capture inspection", () => {
       } } },
       { id: "request_1", kind: "model.request" as const, timestamp: 1_220, sessionID: "ses_1", messageID: "msg_user", providerID: "openai", modelID: "gpt-5", payload: { event: { headers: { authorization: "secret" } } } },
       { id: "assistant", kind: "event" as const, timestamp: 1_230, sessionID: "ses_1", payload: { event: {
-        type: "message.updated", properties: { info: { id: "msg_assistant", sessionID: "ses_1", role: "assistant", parentID: "msg_user", time: { created: 1_230 } } }
+         type: "message.updated", id: "evt_assistant", created: 1_230, data: { info: { id: "msg_assistant", sessionID: "ses_1", role: "assistant", parentID: "msg_user", time: { created: 1_230 } } }
       } } },
       { id: "tool", kind: "tool.execute.before" as const, timestamp: 1_240, sessionID: "ses_1", messageID: "msg_assistant", payload: { event: { tool: "bash", callID: "call_1" } } },
       { id: "assistant_text", kind: "event" as const, timestamp: 1_250, sessionID: "ses_1", messageID: "msg_assistant", payload: { event: {
-        type: "message.part.updated", properties: { part: { type: "text", sessionID: "ses_1", messageID: "msg_assistant", text: "assistant says hi" } }
+         type: "message.part.updated", id: "evt_text", created: 1_250, data: { part: { type: "text", sessionID: "ses_1", messageID: "msg_assistant", text: "assistant says hi" } }
       } } },
       { id: "request_2", kind: "model.request" as const, timestamp: 1_260, sessionID: "ses_1", messageID: "msg_user", providerID: "openai", modelID: "gpt-5", payload: { event: { headers: { "x-request": "second" } } } }
     ];
@@ -57,8 +57,8 @@ describe("capture inspection", () => {
     const history = buildRequestHistory([
       { id: "prompt", kind: "prompt", timestamp: 1_000, sessionID: "ses_1", messageID: "msg_user", payload: { event: { text: "run it" } } },
       { id: "tool", kind: "tool.execute.before", timestamp: 1_010, sessionID: "ses_1", messageID: "msg_assistant", payload: { event: { tool: "bash", callID: "call_1" } } },
-      { id: "assistant", kind: "event", timestamp: 1_020, sessionID: "ses_1", payload: { event: { type: "message.updated", properties: { info: { id: "msg_assistant", sessionID: "ses_1", role: "assistant", parentID: "msg_user", time: { created: 1_020, completed: 1_100 }, tokens: { input: 4 }, cost: 0.1, finish: "tool-calls" } } } } },
-      { id: "text", kind: "event", timestamp: 1_030, sessionID: "ses_1", payload: { event: { type: "message.part.updated", properties: { part: { type: "text", sessionID: "ses_1", messageID: "msg_assistant", text: "done" } } } } }
+       { id: "assistant", kind: "event", timestamp: 1_020, sessionID: "ses_1", payload: { event: { type: "message.updated", id: "evt_assistant", created: 1_020, data: { info: { id: "msg_assistant", sessionID: "ses_1", role: "assistant", parentID: "msg_user", time: { created: 1_020, completed: 1_100 }, tokens: { input: 4 }, cost: 0.1, finish: "tool-calls" } } } } },
+       { id: "text", kind: "event", timestamp: 1_030, sessionID: "ses_1", payload: { event: { type: "message.part.updated", id: "evt_text", created: 1_030, data: { part: { type: "text", sessionID: "ses_1", messageID: "msg_assistant", text: "done" } } } } }
     ]);
 
     expect(history.sessions[0]?.messages[0]?.response).toMatchObject({
@@ -84,9 +84,9 @@ describe("capture inspection", () => {
     const history = buildRequestHistory([
       { id: "prompt", kind: "prompt", timestamp: 1_000, sessionID: "ses_1", messageID: "msg_user", payload: { event: { text: "multi" } } },
       { id: "request_1", kind: "model.request", timestamp: 1_010, sessionID: "ses_1", messageID: "msg_user", payload: { event: {} } },
-      { id: "assistant_1", kind: "event", timestamp: 1_020, sessionID: "ses_1", payload: { event: { type: "message.updated", properties: { info: { id: "assistant_1", sessionID: "ses_1", role: "assistant", parentID: "msg_user", time: { created: 1_020, completed: 1_030 }, tokens: { output: 2 }, cost: 0.2, finish: "stop" } } } } },
+       { id: "assistant_1", kind: "event", timestamp: 1_020, sessionID: "ses_1", payload: { event: { type: "message.updated", id: "evt_assistant_1", created: 1_020, data: { info: { id: "assistant_1", sessionID: "ses_1", role: "assistant", parentID: "msg_user", time: { created: 1_020, completed: 1_030 }, tokens: { output: 2 }, cost: 0.2, finish: "stop" } } } } },
       { id: "request_2", kind: "model.request", timestamp: 1_040, sessionID: "ses_1", messageID: "msg_user", payload: { event: {} } },
-      { id: "assistant_2", kind: "event", timestamp: 1_050, sessionID: "ses_1", payload: { event: { type: "message.updated", properties: { info: { id: "assistant_2", sessionID: "ses_1", role: "assistant", parentID: "msg_user", time: { created: 1_050, completed: 1_060 }, finish: "stop" } } } } }
+       { id: "assistant_2", kind: "event", timestamp: 1_050, sessionID: "ses_1", payload: { event: { type: "message.updated", id: "evt_assistant_2", created: 1_050, data: { info: { id: "assistant_2", sessionID: "ses_1", role: "assistant", parentID: "msg_user", time: { created: 1_050, completed: 1_060 }, finish: "stop" } } } } }
     ]);
     const requests = history.sessions[0]?.messages[0]?.requests;
     expect(requests?.map((item) => item.response?.id)).toEqual(["assistant_1", "assistant_2"]);

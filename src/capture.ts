@@ -332,15 +332,15 @@ export function normalizeModelRequestCapture(event: unknown, timestamp = Date.no
 
 export function normalizeEventCapture(event: unknown, timestamp = Date.now()): CaptureRecord {
   const record = isRecord(event) ? event : {};
-  const properties = isRecord(record.properties) ? record.properties : {};
-  const info = isRecord(properties.info) ? properties.info : {};
-  const part = isRecord(properties.part) ? properties.part : {};
+  const data = isRecord(record.data) ? record.data : {};
+  const info = isRecord(data.info) ? data.info : data;
+  const part = isRecord(data.part) ? data.part : data;
   return captureRecord({
-    id: nextID(timestamp),
+    id: optionalString(record.id) ?? nextID(timestamp),
     kind: "event",
-    timestamp,
-    sessionID: sessionIDFrom(properties) ?? sessionIDFrom(info) ?? sessionIDFrom(part),
-    messageID: messageIDFrom(properties) ?? messageIDFrom(info) ?? messageIDFrom(part),
+    timestamp: typeof record.created === "number" ? record.created : timestamp,
+    sessionID: sessionIDFrom(data) ?? sessionIDFrom(info) ?? sessionIDFrom(part),
+    messageID: messageIDFrom(data) ?? messageIDFrom(info) ?? messageIDFrom(part),
     payload: { event }
   });
 }

@@ -58,7 +58,8 @@ function TextSection(props: { title: string | (() => string); lines: () => strin
 
 function PromptRight(props: { context: Context; sessionID: () => string; metrics: MetricsState; config: InsightsConfig; subscribe: (listener: () => void) => () => void }) {
   const [version, setVersion] = createSignal(0);
-  props.subscribe(() => setVersion((value) => value + 1));
+  const unsubscribe = props.subscribe(() => setVersion((value) => value + 1));
+  onCleanup(unsubscribe);
   const text = () => {
     version();
     const sessionID = props.sessionID();
@@ -73,7 +74,8 @@ function PromptRight(props: { context: Context; sessionID: () => string; metrics
 
 function SessionAnalysis(props: { context: Context; sessionID: string; activity: ActivityState; subscribe: (listener: () => void) => () => void; hydrate: () => void }) {
   const [version, setVersion] = createSignal(0);
-  props.subscribe(() => setVersion((value) => value + 1));
+  const unsubscribe = props.subscribe(() => setVersion((value) => value + 1));
+  onCleanup(unsubscribe);
   props.hydrate();
   const tree = () => treeActivity(props.activity, props.sessionID);
   const lines = () => {
@@ -88,7 +90,8 @@ function SessionAnalysis(props: { context: Context; sessionID: string; activity:
 
 function TokenUsage(props: { sessionID: string; metrics: MetricsState; subagents: SubagentState; subscribe: (listener: () => void) => () => void; hydrate: () => void; theme: SemanticTheme }) {
   const [version, setVersion] = createSignal(0);
-  props.subscribe(() => setVersion((value) => value + 1));
+  const unsubscribe = props.subscribe(() => setVersion((value) => value + 1));
+  onCleanup(unsubscribe);
   props.hydrate();
   const content = () => { version(); return renderSessionTokenUsage(props.metrics, props.sessionID, sumSubagentTokens(props.subagents, props.sessionID)); };
   const title = () => content().split("\n")[0] ?? "Token Usage";
@@ -105,8 +108,10 @@ function Usage(props: { title: string; lines: () => string[]; error?: () => stri
 
 function Sidebar(props: { context: Context; sessionID: string; config: InsightsConfig; metrics: MetricsState; activity: ActivityState; subagents: SubagentState; subscribe: (listener: () => void) => () => void; usageSubscribe: (listener: () => void) => () => void; notify: () => void; hydrateMetrics: () => void; hydrateActivity: () => void; go: ReturnType<typeof createGoUsageRefresher>; goTracker: ReturnType<typeof createGoProviderTracker>; copilot: ReturnType<typeof createCopilotUsageRefresher>; copilotTracker: ReturnType<typeof createCopilotProviderTracker>; copilotToken: string }) {
   const [version, setVersion] = createSignal(0);
-  props.subscribe(() => setVersion((value) => value + 1));
-  props.usageSubscribe(() => setVersion((value) => value + 1));
+  const unsubscribe = props.subscribe(() => setVersion((value) => value + 1));
+  onCleanup(unsubscribe);
+  const unsubscribeUsage = props.usageSubscribe(() => setVersion((value) => value + 1));
+  onCleanup(unsubscribeUsage);
   const goVisible = () => { version(); return goUsageSectionVisible(props.config, props.goTracker.usesOpenCodeGo(props.sessionID)); };
   const copilotVisible = () => { version(); return copilotUsageSectionVisible(props.config, props.copilotToken, props.copilotTracker.usesCopilot(props.sessionID)); };
   createEffect(() => {
@@ -252,6 +257,13 @@ const setup = async (context: Context) => {
       metrics,
       activity,
       subagents,
+      listenerCounts: () => ({
+        metrics: metricListeners.size(),
+        activity: activityListeners.size(),
+        subagents: subagentListeners.size(),
+        go: goListeners.size(),
+        copilot: copilotListeners.size()
+      }),
       render: (sessionID: string) => formatActivityBriefRows(treeActivity(activity, sessionID), treeSubagentCount(activity, sessionID)).join("\n")
     }
   });

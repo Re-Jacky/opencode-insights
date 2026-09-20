@@ -31,7 +31,9 @@ const setup = async (ctx: V2Context) => {
   } catch {}
 
   let captureQueue = Promise.resolve();
+  let acceptingCaptures = true;
   const captureSafely = (record: Parameters<CaptureStore["append"]>[0]) => {
+    if (!acceptingCaptures) return;
     const capture = captureQueue.then(async () => {
       try {
         await store.append(record);
@@ -70,7 +72,9 @@ const setup = async (ctx: V2Context) => {
   return async () => {
     if (cleanedUp) return;
     cleanedUp = true;
+    acceptingCaptures = false;
     controller.abort();
+    await captureQueue;
     await store.close?.();
   };
 };

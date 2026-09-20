@@ -231,8 +231,9 @@ describe("full-fidelity local capture", () => {
     const record = normalizeEventCapture(
       {
         type: "message.part.updated",
-        properties: {
-          sessionID: "ses_1",
+        id: "evt_1",
+        created: 20,
+        data: {
           part: {
             id: "part_1",
             type: "text",

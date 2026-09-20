@@ -301,23 +301,23 @@ export function buildRequestHistory(records: CaptureRecord[]): RequestHistory {
     if (!isRecord(event)) continue;
 
     const type = optionalString(event.type);
-    const properties = isRecord(event.properties) ? event.properties : {};
+    const data = isRecord(event.data) ? event.data : {};
 
     if (type === "session.updated" || type === "session.created") {
-      const info = isRecord(properties.info) ? properties.info : {};
-      const sessionID = optionalString(info.id) ?? optionalString(properties.sessionID);
+      const info = isRecord(data.info) ? data.info : data;
+      const sessionID = optionalString(info.id) ?? optionalString(data.sessionID);
       if (!sessionID) continue;
       const session = getSession(sessionID);
       session.parentID = optionalString(info.parentID) ?? session.parentID;
       session.title = optionalString(info.title) ?? session.title;
-      session.updatedAt = numberFromPath(info.time, "updated") ?? session.updatedAt;
+      session.updatedAt = numberFromPath(info.time, "updated") ?? numberFromPath(event, "created") ?? session.updatedAt;
       updateSessionPath(session, info.path);
       continue;
     }
 
     if (type === "message.updated") {
-      const info = isRecord(properties.info) ? properties.info : {};
-      const sessionID = optionalString(info.sessionID) ?? optionalString(properties.sessionID);
+      const info = isRecord(data.info) ? data.info : data;
+      const sessionID = optionalString(info.sessionID) ?? optionalString(data.sessionID);
       const messageID = optionalString(info.id);
       if (!sessionID || !messageID) continue;
       const role = optionalString(info.role) ?? "unknown";
@@ -347,9 +347,9 @@ export function buildRequestHistory(records: CaptureRecord[]): RequestHistory {
 
     if (type === "message.part.updated" || type === "message.part.delta") {
       if (type === "message.part.delta") continue;
-      const part = isRecord(properties.part) ? properties.part : {};
-      const sessionID = optionalString(part.sessionID) ?? optionalString(properties.sessionID);
-      const messageID = optionalString(part.messageID) ?? optionalString(properties.messageID);
+      const part = isRecord(data.part) ? data.part : data;
+      const sessionID = optionalString(part.sessionID) ?? optionalString(data.sessionID);
+      const messageID = optionalString(part.messageID) ?? optionalString(data.messageID);
       if (!sessionID || !messageID) continue;
       const partType = optionalString(part.type);
       const text = optionalString(part.text);
@@ -529,9 +529,9 @@ function viewerCaptureSql(limit: number) {
             union
             select session_id from recent_events where session_id is not null
             union
-            select json_extract(payload_json, '$.event.properties.sessionID') from recent_events where json_extract(payload_json, '$.event.properties.sessionID') is not null
-            union
-            select json_extract(payload_json, '$.event.properties.info.sessionID') from recent_events where json_extract(payload_json, '$.event.properties.info.sessionID') is not null
+             select json_extract(payload_json, '$.event.data.sessionID') from recent_events where json_extract(payload_json, '$.event.data.sessionID') is not null
+             union
+             select json_extract(payload_json, '$.event.data.info.sessionID') from recent_events where json_extract(payload_json, '$.event.data.info.sessionID') is not null
           ),
           metadata_events as (
             select id
@@ -540,12 +540,12 @@ function viewerCaptureSql(limit: number) {
               and event_type in ('message.updated', 'session.updated', 'session.created')
               and coalesce(
                 session_id,
-                json_extract(payload_json, '$.event.properties.sessionID'),
-                json_extract(payload_json, '$.event.properties.info.sessionID')
+                 json_extract(payload_json, '$.event.data.sessionID'),
+                 json_extract(payload_json, '$.event.data.info.sessionID')
               ) in (select session_id from recent_sessions)
               and (
-                json_extract(payload_json, '$.event.properties.info.path.cwd') is not null
-                or json_extract(payload_json, '$.event.properties.info.path.root') is not null
+                 json_extract(payload_json, '$.event.data.info.path.cwd') is not null
+                 or json_extract(payload_json, '$.event.data.info.path.root') is not null
               )
           )
           select id, kind, timestamp, session_id, message_id, provider_id, model_id, payload_json
@@ -592,12 +592,13 @@ function optionalString(value: unknown): string | undefined {
 
 function historyRequestFromCapture(record: CaptureRecord): HistoryRequest {
   const event = isRecord(record.payload.event) ? record.payload.event : {};
+  const data = isRecord(event.data) ? event.data : event;
   return {
     id: record.id,
     sessionID: record.sessionID,
     messageID: record.messageID,
     timestamp: record.timestamp,
-    agent: optionalString(event.agent),
+    agent: optionalString(data.agent),
     purpose: record.kind === "context" ? "Prepare model context for this message." : "Dispatch a provider model request for this message.",
     providerID: record.providerID,
     modelID: record.modelID,

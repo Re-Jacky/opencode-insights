@@ -796,12 +796,11 @@ export function renderViewerHtml(dbPath: string) {
         return;
       }
       const payload = cached;
-      const hookInput = payload.input || {};
-      const hookOutput = payload.output || {};
-      const systemOutput = request.system?.payload?.output || null;
-      const headerOutput = request.headers?.payload?.output || null;
-      qs("detail").innerHTML =
-        '<p class="explain">These are OpenCode plugin hook values, not a raw HTTP request. <b>Hook input</b> is the context OpenCode passed to the plugin before the model call. <b>Hook output</b> is the model settings returned by the plugin hook. <b>System transform</b> is the system prompt OpenCode prepared for this same call. <b>Headers output</b> is the provider headers hook result.</p>' +
+       const event = payload.event || {};
+       const context = request.context || null;
+       const modelRequest = request.modelRequest || null;
+       qs("detail").innerHTML =
+         '<p class="explain">This is the full-fidelity OpenCode v2 capture for one lifecycle stage. Context and model-request records are shown separately so the original system, messages, options, headers, body, and event envelope remain inspectable.</p>' +
         '<div class="kv">' +
           kv("Hook id", request.id) +
           kv("Agent", request.agent || "-") +
@@ -810,42 +809,14 @@ export function renderViewerHtml(dbPath: string) {
           kv("User message id", request.messageID || "-") +
           kv("Time", fmt(request.timestamp)) +
         '</div>' +
-        '<div class="subhead">Hook Input: context OpenCode supplied</div>' +
-        '<div class="json-tree">' + jsonNode(summarizeHookInput(hookInput), "hookInput", true) + '</div>' +
-        '<div class="subhead">Hook Output: model-call settings</div>' +
-        '<div class="json-tree">' + jsonNode(hookOutput, "hookOutput", true) + '</div>' +
-        '<div class="subhead">System Transform Output</div>' +
-        '<div class="json-tree">' + jsonNode(systemOutput, "systemOutput", true) + '</div>' +
-        '<div class="subhead">Headers Hook Output</div>' +
-        '<div class="json-tree">' + jsonNode(headerOutput, "headersOutput", true) + '</div>' +
-        '<div class="subhead">Raw Full-Fidelity Payload</div>' +
-        '<div class="json-tree">' + jsonNode({ system: request.system?.payload || null, params: payload, headers: request.headers?.payload || null }, "raw", false) + '</div>';
-    }
-
-    function summarizeHookInput(input) {
-      return {
-        sessionID: input?.sessionID,
-        agent: input?.agent,
-        model: input?.model ? {
-          id: input.model.id,
-          providerID: input.model.providerID,
-          name: input.model.name,
-          family: input.model.family,
-          api: input.model.api,
-          limit: input.model.limit,
-          capabilities: input.model.capabilities,
-          cost: input.model.cost
-        } : null,
-        provider: input?.provider ? {
-          id: input.provider.id,
-          source: input.provider.source,
-          name: input.provider.name,
-          env: input.provider.env,
-          options: input.provider.options,
-          key: input.provider.key
-        } : null,
-        message: input?.message || null
-      };
+         '<div class="subhead">V2 Context</div>' +
+         '<div class="json-tree">' + jsonNode(context, "request.context", true) + '</div>' +
+         '<div class="subhead">V2 Model Request</div>' +
+         '<div class="json-tree">' + jsonNode(modelRequest, "request.modelRequest", true) + '</div>' +
+         '<div class="subhead">V2 Event Envelope</div>' +
+         '<div class="json-tree">' + jsonNode(event, "payload.event", true) + '</div>' +
+         '<div class="subhead">Raw Full-Fidelity Payload</div>' +
+         '<div class="json-tree">' + jsonNode(payload, "payload", false) + '</div>';
     }
 
     function setJsonExpanded(expanded) {

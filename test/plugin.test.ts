@@ -89,9 +89,10 @@ describe("plugin definitions", () => {
     const context = createTestContext();
     const dataDir = await mkdtemp(join(tmpdir(), "opencode-insights-plugin-"));
     context.options.dataDir = dataDir;
+    const append = vi.spyOn(SqliteCaptureStore.prototype, "append");
+    context.pushEvent({ type: "session.created", id: "evt_event", created: Date.now(), data: { sessionID: "event" } });
     const cleanup = await plugin.setup(context as unknown as Parameters<typeof plugin.setup>[0]);
 
-    await context.emitEvent({ type: "session.created", properties: { sessionID: "event" } });
     await context.invokeSession("prompt", { sessionID: "prompt" });
     await context.invokeSession("context", { sessionID: "context" });
     await context.invokeSession("model.request", { sessionID: "model" });
@@ -105,7 +106,7 @@ describe("plugin definitions", () => {
     expect(context.tool.hook).toHaveBeenCalledWith("execute.before", expect.any(Function));
     expect(context.tool.hook).toHaveBeenCalledWith("execute.after", expect.any(Function));
 
-    await new Promise((resolve) => setTimeout(resolve, 10));
+    await vi.waitFor(() => expect(append.mock.calls.some(([record]) => record.kind === "event")).toBe(true));
     await cleanup?.();
     const db = await openDatabase(join(dataDir, "insights.sqlite"), true);
     const records = db?.all("select kind from captures order by timestamp, id") as Array<{ kind: string }>;
@@ -146,6 +147,28 @@ describe("plugin definitions", () => {
     await cleanup?.();
   });
 
+  test("drains accepted writes before closing and rejects new writes after cleanup", async () => {
+    const context = createTestContext();
+    const dataDir = await mkdtemp(join(tmpdir(), "opencode-insights-plugin-"));
+    context.options.dataDir = dataDir;
+    let releaseAppend!: () => void;
+    const appendReleased = new Promise<void>((resolve) => { releaseAppend = resolve; });
+    const append = vi.spyOn(SqliteCaptureStore.prototype, "append").mockImplementation(async () => appendReleased);
+    const close = vi.spyOn(SqliteCaptureStore.prototype, "close");
+    const cleanup = await plugin.setup(context as unknown as Parameters<typeof plugin.setup>[0]);
+
+    await context.invokeSession("prompt", { sessionID: "accepted" });
+    const cleanupPromise = cleanup?.();
+    await Promise.resolve();
+    expect(close).not.toHaveBeenCalled();
+
+    releaseAppend();
+    await cleanupPromise;
+    await context.invokeSession("prompt", { sessionID: "rejected" });
+    expect(append).toHaveBeenCalledOnce();
+    expect(close).toHaveBeenCalledOnce();
+  });
+
   test("continues consuming events after an append failure", async () => {
     const context = createTestContext();
     const dataDir = await mkdtemp(join(tmpdir(), "opencode-insights-plugin-"));
@@ -154,8 +177,8 @@ describe("plugin definitions", () => {
     append.mockRejectedValueOnce(new Error("first event failed"));
     const cleanup = await plugin.setup(context as unknown as Parameters<typeof plugin.setup>[0]);
 
-    context.pushEvent({ type: "session.created", properties: { sessionID: "failed" } });
-    context.pushEvent({ type: "session.updated", properties: { sessionID: "survived" } });
+    context.pushEvent({ type: "session.created", id: "evt_failed", created: 1, data: { sessionID: "failed" } });
+    context.pushEvent({ type: "session.updated", id: "evt_survived", created: 2, data: { sessionID: "survived" } });
     await new Promise((resolve) => setTimeout(resolve, 20));
 
     expect(append).toHaveBeenCalledTimes(2);

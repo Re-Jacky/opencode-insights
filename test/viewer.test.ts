@@ -152,6 +152,17 @@ describe("viewer conversation helpers", () => {
     }
   });
 
+  test("renders v2 request detail fields without legacy hook labels", () => {
+    const html = renderViewerHtml("/tmp/insights.sqlite");
+    expect(html).toContain("payload.event");
+    expect(html).toContain("request.context");
+    expect(html).toContain("request.modelRequest");
+    expect(html).toContain("V2 Context");
+    expect(html).not.toContain("Hook Input");
+    expect(html).not.toContain("System Transform");
+    expect(html).not.toContain("Headers Hook");
+  });
+
   test("labels v2 prompt, context, and model request lifecycle stages", async () => {
     const dir = await mkdtemp(join(tmpdir(), "opencode-insights-viewer-"));
     const dbPath = join(dir, "insights.sqlite");
@@ -181,7 +192,9 @@ describe("viewer conversation helpers", () => {
       const sessionPayload = JSON.stringify({
         event: {
           type: "session.updated",
-          properties: {
+          id: "evt_session",
+          created: 900,
+          data: {
             sessionID: "ses_dot",
             info: {
               id: "ses_dot",
@@ -192,18 +205,13 @@ describe("viewer conversation helpers", () => {
           }
         }
       });
-      const messagePayload = JSON.stringify({
-        input: { sessionID: "ses_dot" },
-        output: {
-          message: { id: "msg_user", role: "user", sessionID: "ses_dot", time: { created: 1_000 } },
-          parts: [{ type: "text", messageID: "msg_user", sessionID: "ses_dot", text: "hi" }]
-        }
-      });
       const deltaPayload = (id: number) =>
         JSON.stringify({
           event: {
             type: "message.part.delta",
-            properties: { sessionID: "ses_dot", messageID: "msg_assistant", delta: String(id) }
+            id: `evt_delta_${id}`,
+            created: 1_000 + id,
+            data: { sessionID: "ses_dot", messageID: "msg_assistant", delta: String(id) }
           }
         });
 
@@ -221,7 +229,7 @@ describe("viewer conversation helpers", () => {
           payload_json text not null
         );
         insert into captures values ('session_path', 'event', 900, 'ses_dot', null, null, null, 'session.updated', '${sessionPayload.replace(/'/g, "''")}');
-        insert into captures values ('msg', 'chat.message', 1000, 'ses_dot', null, null, null, null, '${messagePayload.replace(/'/g, "''")}');
+        insert into captures values ('msg', 'event', 1000, 'ses_dot', 'msg_user', null, null, 'message.updated', '${JSON.stringify({ event: { type: "message.updated", id: "evt_message", created: 1000, data: { info: { id: "msg_user", sessionID: "ses_dot", role: "user", time: { created: 1000 } } } } }).replace(/'/g, "''")}');
         insert into captures values ('delta_1', 'event', 1100, 'ses_dot', 'msg_assistant', null, null, 'message.part.delta', '${deltaPayload(1).replace(/'/g, "''")}');
         insert into captures values ('delta_2', 'event', 1200, 'ses_dot', 'msg_assistant', null, null, 'message.part.delta', '${deltaPayload(2).replace(/'/g, "''")}');`
       ]);

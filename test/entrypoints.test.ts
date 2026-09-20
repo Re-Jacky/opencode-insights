@@ -86,11 +86,19 @@ describe("plugin entrypoints", () => {
       expect(runtime.render("ses_root")).toContain("1 warning");
       expect(runtime.render("ses_root")).toContain("1 auto-compact");
       expect(runtime.render("ses_root")).toContain("1 subagent");
-      await new Promise((resolve) => setTimeout(resolve, 50));
-      let renderBoundary = "";
-      try {
-        claims.find((claim) => claim.append === "sidebar.content")?.render({ sessionID: "ses_root" });
-      } catch (error) {
+       await new Promise((resolve) => setTimeout(resolve, 50));
+       let renderBoundary = "";
+       try {
+         const sidebar = claims.find((claim) => claim.append === "sidebar.content")!;
+         createRoot((dispose) => {
+           try { sidebar.render({ sessionID: "ses_root" }); } finally { dispose(); }
+         });
+         for (let index = 0; index < 3; index += 1) {
+           createRoot((dispose) => {
+             try { sidebar.render({ sessionID: "ses_root" }); } finally { dispose(); }
+           });
+         }
+       } catch (error) {
         renderBoundary = String(error);
       }
       expect(renderBoundary).toContain("No renderer found");
@@ -119,11 +127,11 @@ describe("plugin entrypoints", () => {
     } catch (error) {
       postCleanupBoundary = String(error);
     }
-    expect(postCleanupBoundary).toBe(preCleanup.renderBoundary);
-    await cleanup?.();
-    expect(unregistered).toBe(3);
-    expect(listeners.size).toBe(0);
-    expect(listenHandler).toBeDefined();
+       expect(postCleanupBoundary).toBe(preCleanup.renderBoundary);
+       await cleanup?.();
+       expect(unregistered).toBe(3);
+       expect(listeners.size).toBe(0);
+       expect(listenHandler).toBeDefined();
   });
 
   test("production entrypoints do not import v1 plugin contracts", () => {

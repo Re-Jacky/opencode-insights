@@ -10,6 +10,9 @@ export function createListenerRegistry() {
     subscribe(listener: Listener) {
       listeners.add(listener);
       return () => listeners.delete(listener);
+    },
+    size() {
+      return listeners.size;
     }
   };
 }
