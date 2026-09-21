@@ -194,6 +194,30 @@ describe("applyInsightEvent", () => {
     expect(s.metrics.sessionTokenUsageByID["ses_a"]?.responseCount).toBe(1);
   });
 
+  test("records skill hits from the tool input on session.tool.called", () => {
+    const { state: s, activity } = state();
+    applyInsightEvent(s, {
+      type: "session.tool.input.started",
+      created: 1,
+      data: { sessionID: "ses_a", assistantMessageID: "msg_1", id: "call_1", name: "skill" }
+    });
+    applyInsightEvent(s, {
+      type: "session.tool.called",
+      created: 2,
+      data: { sessionID: "ses_a", assistantMessageID: "msg_1", id: "call_1", input: { name: "writing-plans" } }
+    });
+    applyInsightEvent(s, {
+      type: "session.tool.success",
+      created: 3,
+      data: { sessionID: "ses_a", assistantMessageID: "msg_1", id: "call_1", content: [], metadata: {} }
+    });
+
+    // In V2 a skill activation is a `skill` tool call; its input arrives on
+    // `session.tool.called`, and the name is what makes it readable.
+    expect(activity.bySessionID["ses_a"]?.skills).toEqual({ "writing-plans": 1 });
+    expect(activity.bySessionID["ses_a"]?.toolCalls).toBe(1);
+  });
+
   test("records tools and compactions as activity", () => {
     const { state: s, activity } = state();
     applyInsightEvent(s, {

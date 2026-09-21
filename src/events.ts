@@ -184,12 +184,19 @@ export function applyInsightEvent(state: InsightState, event: unknown): InsightE
       const name = state.toolNameById[toolID] ?? "tool";
       const error = isRecord(data.error) ? str(data.error.message) : undefined;
       const status = type === "session.tool.failed" ? "error" : type === "session.tool.success" ? "completed" : "running";
+      // `session.tool.called` is the only tool event that carries the call's input,
+      // and a skill hit is only readable from it (`input.name`).
+      const input = isRecord(data.input) ? (data.input as { name?: string }) : undefined;
       recordToolActivity(state.metrics, sessionID, messageID ?? "");
       if (
         recordToolPart(state.activity, sessionID, {
           id: toolID,
           tool: name,
-          ...(status === "running" ? {} : { state: { status, ...(error ? { error } : {}) } })
+          state: {
+            status,
+            ...(input !== undefined ? { input } : {}),
+            ...(error ? { error } : {})
+          }
         })
       ) {
         result.activity = true;
