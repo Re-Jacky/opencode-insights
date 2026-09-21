@@ -99,6 +99,22 @@ describe("activity state", () => {
     expect(state.bySessionID["ses_a"]?.toolCalls).toBe(1);
   });
 
+  test("reads the skill identifier from either input shape the host has used", () => {
+    const state = createActivityState();
+    // Current hosts send the skill id (`{ id }`); earlier ones sent `{ name }`.
+    recordToolPart(state, "ses_a", {
+      id: "call_1",
+      tool: "skill",
+      state: { status: "completed", input: { id: "writing-plans" } }
+    });
+    recordToolPart(state, "ses_a", {
+      id: "call_2",
+      tool: "skill",
+      state: { status: "completed", input: { name: "brainstorming" } }
+    });
+    expect(state.bySessionID["ses_a"]?.skills).toEqual({ "writing-plans": 1, brainstorming: 1 });
+  });
+
   test("recordSkill counts a skill once per id and ignores empty names", () => {
     const state = createActivityState();
     expect(recordSkill(state, "ses_a", "skl_1", "brainstorming")).toBe(true);

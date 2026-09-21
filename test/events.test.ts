@@ -204,7 +204,7 @@ describe("applyInsightEvent", () => {
     applyInsightEvent(s, {
       type: "session.tool.called",
       created: 2,
-      data: { sessionID: "ses_a", assistantMessageID: "msg_1", id: "call_1", input: { name: "writing-plans" } }
+      data: { sessionID: "ses_a", assistantMessageID: "msg_1", id: "call_1", input: { id: "writing-plans" } }
     });
     applyInsightEvent(s, {
       type: "session.tool.success",

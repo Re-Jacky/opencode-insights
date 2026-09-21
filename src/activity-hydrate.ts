@@ -1,4 +1,4 @@
-import { recordChild, recordCompaction, recordSkill, recordToolPart, type ActivityState } from "./activity.js";
+import { recordChild, recordCompaction, recordSkill, recordToolPart, type ActivityState, type ToolPartInput } from "./activity.js";
 import type { CopilotProviderTracker } from "./copilot-usage.js";
 import type { GoProviderTracker } from "./go-usage.js";
 import { recordAssistantMessage, type MetricsState } from "./metrics.js";
@@ -146,7 +146,7 @@ function applyToolContent(state: ActivityState, sessionID: string, content: Arra
         ? {
             state: {
               ...(status !== undefined ? { status } : {}),
-              ...(input !== undefined ? { input: input as { name?: string } } : {}),
+              ...(input !== undefined ? { input: input as ToolPartInput } : {}),
               ...(error !== undefined ? { error } : {})
             }
           }

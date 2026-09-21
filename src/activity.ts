@@ -75,10 +75,12 @@ function seen(state: ActivityState, sessionID: string, key: string): boolean {
   return false;
 }
 
+export type ToolPartInput = { name?: string; id?: string };
+
 export function recordToolPart(
   state: ActivityState,
   sessionID: string,
-  part: { id?: string; tool: string; state?: { status?: string; input?: { name?: string }; error?: string } }
+  part: { id?: string; tool: string; state?: { status?: string; input?: ToolPartInput; error?: string } }
 ): boolean {
   const activity = activityFor(state, sessionID);
   let counted = false;
@@ -102,8 +104,10 @@ export function recordToolPart(
       }
     }
   }
-  if (part.tool === "skill" && partState?.input && typeof partState.input.name === "string") {
-    recordSkill(state, sessionID, part.id, partState.input.name);
+  if (part.tool === "skill" && partState?.input) {
+    // Current hosts name the skill tool's input field `id`; earlier ones used `name`.
+    const skill = partState.input.name ?? partState.input.id;
+    if (typeof skill === "string") recordSkill(state, sessionID, part.id, skill);
   }
   return counted;
 }

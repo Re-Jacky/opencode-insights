@@ -92,6 +92,40 @@ describe("hydrateInsights", () => {
     expect(s.metrics.messageMetricsByID["msg_1"]).toMatchObject({ totalTokens: 50, durationMs: 4_000 });
   });
 
+  test("reads skill hits from hydrated skill tool parts", async () => {
+    const s = state();
+    const data: ActivityData = {
+      session: {
+        list: () => [{ id: "ses_root" }],
+        message: {
+          sync: async () => {},
+          list: () => [],
+          history: async () => [
+            {
+              type: "assistant",
+              id: "msg_1",
+              time: { created: 1_000, completed: 2_000 },
+              // Real stored shape since the current host renamed the skill tool's
+              // input field from `name` to `id`.
+              content: [
+                {
+                  type: "tool",
+                  id: "call_1",
+                  name: "skill",
+                  state: { status: "completed", input: { id: "systematic-debugging" }, content: [] }
+                }
+              ]
+            }
+          ]
+        }
+      }
+    };
+
+    await hydrateInsights(data, s, "ses_root");
+
+    expect(s.activity.bySessionID["ses_root"]?.skills).toEqual({ "systematic-debugging": 1 });
+  });
+
   test("hydrates the whole session, not the host's newest-20 message window", async () => {
     const s = state();
     const all = Array.from({ length: 25 }, (_, index) => ({

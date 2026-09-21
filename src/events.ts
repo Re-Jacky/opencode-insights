@@ -1,4 +1,4 @@
-import { recordChild, recordCompaction, recordSkill, recordStep, recordToolPart, type ActivityState } from "./activity.js";
+import { recordChild, recordCompaction, recordSkill, recordStep, recordToolPart, type ActivityState, type ToolPartInput } from "./activity.js";
 import type { CopilotProviderTracker } from "./copilot-usage.js";
 import type { GoProviderTracker } from "./go-usage.js";
 import {
@@ -185,8 +185,9 @@ export function applyInsightEvent(state: InsightState, event: unknown): InsightE
       const error = isRecord(data.error) ? str(data.error.message) : undefined;
       const status = type === "session.tool.failed" ? "error" : type === "session.tool.success" ? "completed" : "running";
       // `session.tool.called` is the only tool event that carries the call's input,
-      // and a skill hit is only readable from it (`input.name`).
-      const input = isRecord(data.input) ? (data.input as { name?: string }) : undefined;
+      // and the skill identifier lives in it (`input.name` on older hosts, `input.id`
+      // on current ones).
+      const input = isRecord(data.input) ? (data.input as ToolPartInput) : undefined;
       recordToolActivity(state.metrics, sessionID, messageID ?? "");
       if (
         recordToolPart(state.activity, sessionID, {
