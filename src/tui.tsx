@@ -15,7 +15,7 @@ import {
   treeSubagentCount,
   type SessionAnalysisRow
 } from "./activity.js";
-import { createSubagentState, sumSubagentTokens } from "./subagents.js";
+import { createSubagentState, getSubagentSidebarModel, sumSubagentTokens } from "./subagents.js";
 import { createGoProviderTracker } from "./go-usage.js";
 import { createCopilotProviderTracker } from "./copilot-usage.js";
 import { applyInsightEvent, createInsightState, type InsightState } from "./events.js";
@@ -191,6 +191,59 @@ function SessionAnalysisDialog(props: {
   );
 }
 
+function SubagentsSection(props: { sessionID: string; state: InsightState; version: number }) {
+  const context = usePlugin();
+  const theme = context.theme;
+  const [collapsed, setCollapsed] = createSignal(false);
+  const [hovered, setHovered] = createSignal<string | undefined>();
+  const model = createMemo(() => {
+    props.version;
+    return getSubagentSidebarModel(props.state.subagents, props.sessionID, { now: Date.now() });
+  });
+
+  return (
+    <Show when={model()}>
+      {(value) => (
+        <box flexDirection="column">
+          <text attributes={bold} onMouseDown={() => setCollapsed((current) => !current)}>
+            {`${collapsed() ? "▶" : "▼"} ${value().title}`}
+          </text>
+          <Show when={!collapsed()}>
+            <text fg={theme.text.muted}>{value().summary}</text>
+            <For each={value().rows}>
+              {(row) => (
+                <box
+                  flexDirection="row"
+                  {...(hovered() === row.id ? { backgroundColor: theme.background.raised.base } : {})}
+                  onMouseMove={() => setHovered(row.id)}
+                  onMouseOut={() => setHovered(undefined)}
+                  onMouseUp={() => context.ui.router.navigate({ type: "session", sessionID: row.id })}
+                >
+                  <text
+                    fg={
+                      row.status === "running"
+                        ? theme.text.feedback.success.base
+                        : row.status === "error"
+                          ? theme.text.feedback.error.base
+                          : theme.text.muted
+                    }
+                  >
+                    {"• "}
+                  </text>
+                  <box flexDirection="column">
+                    <text fg={theme.text.base}>{row.title}</text>
+                    <text fg={theme.text.muted}>{row.subtitle}</text>
+                  </box>
+                </box>
+              )}
+            </For>
+          </Show>
+        </box>
+      )}
+    </Show>
+  );
+}
+
 async function setup(context: Context) {
   const config = await readInsightsConfig({ dataDir: context.options.dataDir });
   const activity = createActivityState();
@@ -244,6 +297,7 @@ async function setup(context: Context) {
           state={state}
           version={metricsRev() + activityRev() + subagentsRev() + now()}
         />
+        <SubagentsSection sessionID={input.sessionID} state={state} version={subagentsRev() + now()} />
       </box>
     )
   });

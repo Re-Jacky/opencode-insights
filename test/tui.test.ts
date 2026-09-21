@@ -36,4 +36,13 @@ describe("V2 TUI plugin shell", () => {
     expect(text).toContain("context.ui.dialog.show(");
     expect(text).toContain('context.ui.dialog.set({ size: "large" })');
   });
+
+  test("renders subagents with router navigation and hover", () => {
+    const text = source();
+    expect(text).toContain("SubagentsSection");
+    expect(text).toContain("getSubagentSidebarModel");
+    expect(text).toContain('context.ui.router.navigate({ type: "session", sessionID: row.id })');
+    expect(text).toContain("onMouseMove");
+    expect(text).toContain("theme.background.raised.base");
+  });
 });
