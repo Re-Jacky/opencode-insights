@@ -491,7 +491,7 @@ function cacheReadRate(usage: AssistantResponseUsage) {
   return promptTokens > 0 ? (usage.cacheReadTokens / promptTokens) * 100 : undefined;
 }
 
-function formatTokenCount(value: number) {
+export function formatTokenCount(value: number) {
   if (Math.abs(value) >= 1_000_000) return `${formatAbbreviatedTokenCount(value, 1_000_000)}m`;
   if (Math.abs(value) >= 1_000) return `${formatAbbreviatedTokenCount(value, 1_000)}k`;
   return String(Math.round(value));

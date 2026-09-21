@@ -8,12 +8,10 @@ import {
   recordToolActivity,
   type MetricsState
 } from "./metrics.js";
-import { applySubagentEvent, type SubagentState } from "./subagents.js";
 
 export type InsightState = {
   metrics: MetricsState;
   activity: ActivityState;
-  subagents: SubagentState;
   goProviders: GoProviderTracker;
   copilotProviders: CopilotProviderTracker;
   stepStartedAt: Record<string, number>;
@@ -40,7 +38,6 @@ type StepUsage = {
 export function createInsightState(parts: {
   metrics: MetricsState;
   activity: ActivityState;
-  subagents: SubagentState;
   goProviders: GoProviderTracker;
   copilotProviders: CopilotProviderTracker;
 }): InsightState {
@@ -223,23 +220,30 @@ export function applyInsightEvent(state: InsightState, event: unknown): InsightE
       const parentID = str(data.parentID);
       const title = str(data.title);
       if (title) state.activity.titles[sessionID] = title;
-      if (parentID) recordChild(state.activity, sessionID, parentID);
+      if (parentID) {
+        recordChild(state.activity, sessionID, parentID);
+        // The child now exists in the host's session store, which is where the
+        // Subagents section reads it from.
+        result.subagents = true;
+      }
       recordProvider(sessionID, providerFrom(data));
-      if (applySubagentEvent(state.subagents, event)) result.subagents = true;
       break;
     }
     case "session.renamed": {
       if (!sessionID) break;
       const title = str(data.title);
       if (title) state.activity.titles[sessionID] = title;
-      if (applySubagentEvent(state.subagents, event)) result.subagents = true;
+      result.subagents = true;
       break;
     }
-    case "session.status":
-    case "session.idle":
+    case "session.execution.started":
+    case "session.execution.succeeded":
     case "session.execution.failed":
+    case "session.execution.interrupted":
     case "session.usage.updated": {
-      if (applySubagentEvent(state.subagents, event)) result.subagents = true;
+      // These events update the host's session store, which owns subagent status
+      // and totals; all this plugin needs is a nudge to re-read it.
+      result.subagents = true;
       break;
     }
     case "session.model.selected": {

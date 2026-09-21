@@ -44,10 +44,15 @@ describe("V2 TUI plugin shell", () => {
     );
   });
 
-  test("renders subagents with router navigation and hover", () => {
+  test("renders subagents from the native session store with router navigation and hover", () => {
     const text = source();
     expect(text).toContain("SubagentsSection");
     expect(text).toContain("getSubagentSidebarModel");
+    // Liveness and identity come from the host's session store, not from an
+    // event-derived status machine.
+    expect(text).toContain("context.data.session.list()");
+    expect(text).toContain("context.data.session.status(");
+    expect(text).toContain("parentID === props.sessionID");
     expect(text).toContain('context.ui.router.navigate({ type: "session", sessionID: row.id })');
     expect(text).toContain("onMouseMove");
     expect(text).toContain("theme.background.raised.base");

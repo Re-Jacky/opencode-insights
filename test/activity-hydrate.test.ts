@@ -10,14 +10,12 @@ import {
 } from "../src/activity-hydrate.js";
 import { createGoProviderTracker } from "../src/go-usage.js";
 import { createMetricsState } from "../src/metrics.js";
-import { createSubagentState } from "../src/subagents.js";
 
 function state(): HydrationState {
   const activity = createActivityState();
   return {
     activity,
     metrics: createMetricsState(),
-    subagents: createSubagentState(activity),
     goProviders: createGoProviderTracker(),
     copilotProviders: createCopilotProviderTracker()
   };
@@ -60,7 +58,6 @@ describe("hydrateInsights", () => {
     expect(s.activity.bySessionID["ses_child"]?.autoCompacts).toBe(1);
     expect(s.activity.bySessionID["ses_child"]?.skills).toEqual({ brainstorming: 1 });
     expect(s.metrics.responseUsageByMessageID["msg_1"]?.usage.outputTokens).toBe(20);
-    expect(s.subagents.children["ses_child"]?.status).toBe("done");
     expect(s.copilotProviders.usesCopilot("ses_child")).toBe(true);
     expect(s.activity.hydrated.has("ses_child")).toBe(true);
   });
@@ -181,7 +178,7 @@ describe("hydrateInsights", () => {
     expect(requests[0]).toMatchObject({ limit: 200 });
   });
 
-  test("does not create a subagent row for a session without a parent", async () => {
+  test("does not link a session without a parent to a subagent tree", async () => {
     const s = state();
     const data: ActivityData = {
       session: {
@@ -192,7 +189,7 @@ describe("hydrateInsights", () => {
 
     await hydrateInsights(data, s, "ses_root");
 
-    expect(Object.keys(s.subagents.children)).toHaveLength(0);
+    expect(s.activity.childrenByParent["ses_root"]).toBeUndefined();
   });
 
   test("leaves the session unhydrated when message sync fails so it can retry", async () => {

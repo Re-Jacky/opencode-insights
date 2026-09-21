@@ -23,11 +23,11 @@ OpenCode V2 TUI plugin `@rejacky/opencode-insights` — reactive sidebar section
 ## Architecture
 
 - `src/tui.tsx` — the whole plugin: `Plugin.define({ id: "opencode-insights", setup })` from `@opencode/plugin/tui`. `setup` owns plain state, subscribes once with `context.data.listen`, registers the `sidebar.content` (prepended, so the block sits above the native `Context`/`MCP` sections) and `session.composer.top` slots, and returns a cleanup that unsubscribes and clears the ticker. Components are Solid reactive (`createMemo`/`createSignal`/`Show`/`For`); a shared 1s `now()` ticker drives time-based recomputation.
-- `src/events.ts` — pure V2 event bridge: maps `OpenCodeEvent`s onto metrics/activity/subagents/provider state and reports which domains changed. Unit-tested with V2-shaped fixtures.
+- `src/events.ts` — pure V2 event bridge: maps `OpenCodeEvent`s onto metrics/activity/provider state and reports which domains changed (subagents are flagged for a native re-read, never derived). Unit-tested with V2-shaped fixtures.
 - `src/config.ts` — `~/.opencode-insights/config.jsonc` parsing (`promptRightMetrics`, `goUsage`, `copilotUsage`) and `resolveCopilotToken`.
 - `src/metrics.ts` — TPS/cache metrics, `promptRightMetrics`, and session token usage rendering.
 - `src/activity.ts` — session activity metrics (tool calls, skills, auto-compactions, steps) with per-metric keyed dedup; `src/activity-hydrate.ts` — history backfill via `context.data.session.list()` and the client's paged `message.list()` (`listAllMessages`). The host's `message.sync()` window is only the newest 20 messages, so session totals page the full history and fall back to that window only when paging is unavailable.
-- `src/subagents.ts` — subagent tracking from V2 session events (`session.created`/`renamed`/`status`/`idle`/`execution.failed`/`usage.updated`); `src/go-usage.ts` — opt-in Go usage; `src/copilot-usage.ts` — GitHub Copilot premium-interaction quota.
+- `src/subagents.ts` — subagent rows built from the host's native session store (`data.session.list()` + `status()`, `SessionInfo.outcome`/`time`/`tokens`); `session.execution.*` events only flag a re-read, so nothing here derives status from the event stream. `src/go-usage.ts` — opt-in Go usage; `src/copilot-usage.ts` — GitHub Copilot premium-interaction quota.
 
 ## Operational rules
 

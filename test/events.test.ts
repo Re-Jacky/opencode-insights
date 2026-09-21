@@ -4,21 +4,17 @@ import { createCopilotProviderTracker } from "../src/copilot-usage.js";
 import { applyInsightEvent, createInsightState } from "../src/events.js";
 import { createGoProviderTracker } from "../src/go-usage.js";
 import { createMetricsState } from "../src/metrics.js";
-import { createSubagentState } from "../src/subagents.js";
 
 function state() {
   const activity = createActivityState();
-  const subagents = createSubagentState(activity);
   return {
     state: createInsightState({
       metrics: createMetricsState(),
       activity,
-      subagents,
       goProviders: createGoProviderTracker(),
       copilotProviders: createCopilotProviderTracker()
     }),
-    activity,
-    subagents
+    activity
   };
 }
 
@@ -243,7 +239,7 @@ describe("applyInsightEvent", () => {
   });
 
   test("records child sessions, titles, and providers on session.created", () => {
-    const { state: s, activity, subagents } = state();
+    const { state: s, activity } = state();
     const result = applyInsightEvent(s, {
       type: "session.created",
       created: 1,
@@ -259,9 +255,27 @@ describe("applyInsightEvent", () => {
     expect(result.subagents).toBe(true);
     expect(activity.childrenByParent["ses_root"]).toEqual(["ses_child"]);
     expect(activity.titles["ses_child"]).toBe("Child");
-    expect(subagents.children["ses_child"]?.status).toBe("running");
     expect(s.copilotProviders.usesCopilot("ses_child")).toBe(true);
     expect(s.goProviders.usesOpenCodeGo("ses_child")).toBe(false);
+  });
+
+  test("only invalidates subagent rows on execution events", () => {
+    // The Subagents section reads the host's session store, so these events must
+    // never derive state here — they only say "re-read the native store".
+    for (const type of [
+      "session.execution.started",
+      "session.execution.succeeded",
+      "session.execution.failed",
+      "session.execution.interrupted",
+      "session.usage.updated"
+    ]) {
+      const { state: s, activity } = state();
+      const result = applyInsightEvent(s, { type, created: 5, data: { sessionID: "ses_child" } });
+
+      expect(result.subagents).toBe(true);
+      expect(result.activity).toBe(false);
+      expect(activity.bySessionID["ses_child"]).toBeUndefined();
+    }
   });
 
   test("records skills from session.skill.activated", () => {

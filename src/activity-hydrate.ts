@@ -2,7 +2,6 @@ import { recordChild, recordCompaction, recordSkill, recordToolPart, type Activi
 import type { CopilotProviderTracker } from "./copilot-usage.js";
 import type { GoProviderTracker } from "./go-usage.js";
 import { recordAssistantMessage, type MetricsState } from "./metrics.js";
-import { recordSubagentFromSessionInfo, type SubagentState } from "./subagents.js";
 
 export type ActivitySession = {
   id: string;
@@ -42,7 +41,6 @@ export type ActivityData = {
 export type HydrationState = {
   activity: ActivityState;
   metrics: MetricsState;
-  subagents: SubagentState;
   goProviders: GoProviderTracker;
   copilotProviders: CopilotProviderTracker;
 };
@@ -265,7 +263,6 @@ export async function hydrateInsights(data: ActivityData, state: HydrationState,
     if (session.title) state.activity.titles[session.id] = session.title;
     if (session.parentID) {
       recordChild(state.activity, session.id, session.parentID);
-      recordSubagentFromSessionInfo(state.subagents, session);
     }
     recordProvider(state, session.id, session.model?.providerID);
   }

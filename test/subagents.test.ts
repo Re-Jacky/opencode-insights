@@ -1,323 +1,147 @@
 import { describe, expect, test } from "vitest";
 import { createActivityState, recordToolPart } from "../src/activity.js";
-import {
-  applySubagentEvent,
-  createSubagentState,
-  getSubagentSidebarModel,
-  getSubagentSidebarRowAtLine,
-  pruneStaleSubagents,
-  renderSubagentFooter,
-  renderSubagentSidebar,
-  renderSubagentStatus
-} from "../src/subagents.js";
+import { getSubagentSidebarModel, subagentStatus, sumSubagentTokens, type SubagentSession } from "../src/subagents.js";
 
-function created(overrides: Record<string, unknown> = {}) {
+function session(overrides: Partial<SubagentSession> = {}): SubagentSession {
   return {
-    type: "session.created",
-    created: 1_000,
-    data: {
-      sessionID: "ses_child",
-      parentID: "ses_root",
-      title: "Explore tests",
-      ...overrides
-    }
+    id: "ses_child",
+    title: "Review tests",
+    status: "running",
+    time: { created: 1_000 },
+    ...overrides
   };
 }
 
-describe("applySubagentEvent (V2)", () => {
-  test("creates a running subagent from session.created with a parent", () => {
-    const state = createSubagentState();
-
-    expect(applySubagentEvent(state, created())).toBe(true);
-
-    expect(state.children["ses_child"]).toMatchObject({
-      id: "ses_child",
-      parentID: "ses_root",
-      title: "Explore tests",
-      status: "running"
-    });
+describe("subagent status from the native session store", () => {
+  test("maps native status and outcome onto the row status", () => {
+    expect(subagentStatus(session({ status: "running" }))).toBe("running");
+    expect(subagentStatus(session({ status: "idle" }))).toBe("done");
+    expect(subagentStatus(session({ status: "idle", outcome: "succeeded" }))).toBe("done");
+    expect(subagentStatus(session({ status: "idle", outcome: "interrupted" }))).toBe("done");
+    expect(subagentStatus(session({ status: "idle", outcome: "failed" }))).toBe("error");
+    // The host store owns liveness: a stale outcome never overrides "running".
+    expect(subagentStatus(session({ status: "running", outcome: "failed" }))).toBe("running");
   });
 
-  test("ignores a root session without a parent", () => {
-    const state = createSubagentState();
-    expect(applySubagentEvent(state, { type: "session.created", created: 1, data: { sessionID: "ses_root" } })).toBe(false);
-    expect(Object.keys(state.children)).toHaveLength(0);
+  test("a finished subagent stops ticking and keeps its final duration", () => {
+    const child = session({ status: "idle", outcome: "succeeded", time: { created: 1_000, idle: 4_000 } });
+
+    const shortlyAfter = getSubagentSidebarModel([child], { now: 5_000 });
+    const laterOn = getSubagentSidebarModel([child], { now: 100_000 });
+
+    expect(shortlyAfter?.summary).toBe("0 running · 1 done · 0 error");
+    expect(shortlyAfter?.rows[0]).toMatchObject({ id: "ses_child", status: "done", subtitle: "00:03" });
+    // The same row minutes later: identical, because nothing counts up any more.
+    expect(laterOn?.rows[0]?.subtitle).toBe("00:03");
   });
 
-  test("never registers a session as its own child", () => {
-    const state = createSubagentState();
-    expect(
-      applySubagentEvent(state, { type: "session.created", created: 1, data: { sessionID: "ses_x", parentID: "ses_x" } })
-    ).toBe(false);
+  test("counts up while the host reports the subagent running", () => {
+    const child = session({ status: "running", time: { created: 1_000 } });
+
+    expect(getSubagentSidebarModel([child], { now: 6_000 })?.rows[0]?.subtitle).toBe("00:05");
+    expect(getSubagentSidebarModel([child], { now: 9_000 })?.rows[0]?.subtitle).toBe("00:08");
   });
 
-  test("marks a subagent done on session.idle and errored on session.execution.failed", () => {
-    const state = createSubagentState();
-    applySubagentEvent(state, created());
-    applySubagentEvent(state, { type: "session.idle", created: 2, data: { sessionID: "ses_child" } });
-    expect(state.children["ses_child"]?.status).toBe("done");
+  test("prefers the native idle stamp and falls back to the first observed idle time", () => {
+    const stamped = session({ status: "idle", time: { created: 1_000, idle: 3_000 } });
+    expect(getSubagentSidebarModel([stamped], { now: 5_000, observedIdleAt: () => 4_500 })?.rows[0]?.subtitle).toBe("00:02");
 
-    applySubagentEvent(state, created());
-    applySubagentEvent(state, {
-      type: "session.execution.failed",
-      created: 3,
-      data: { sessionID: "ses_child", error: { type: "x", message: "boom" } }
-    });
-    expect(state.children["ses_child"]?.status).toBe("error");
+    const unstamped = session({ status: "idle", time: { created: 1_000 } });
+    expect(getSubagentSidebarModel([unstamped], { now: 5_000, observedIdleAt: () => 4_000 })?.rows[0]?.subtitle).toBe("00:03");
   });
 
-  test("updates tokens from session.usage.updated", () => {
-    const state = createSubagentState();
-    applySubagentEvent(state, created());
-    applySubagentEvent(state, {
-      type: "session.usage.updated",
-      created: 4,
-      data: { sessionID: "ses_child", tokens: { input: 10, output: 20, reasoning: 5, cache: { read: 1, write: 2 } } }
-    });
-    expect(state.children["ses_child"]?.tokens?.total).toBe(38);
+  test("shows no duration rather than a wrong one when no end is known", () => {
+    const child = session({ status: "idle", time: { created: 1_000 }, tokens: { input: 12, output: 8 } });
+
+    expect(getSubagentSidebarModel([child], { now: 5_000 })?.rows[0]?.subtitle).toBe("20 tokens");
   });
 
-  test("renames an existing subagent from session.renamed", () => {
-    const state = createSubagentState();
-    applySubagentEvent(state, created());
-    expect(
-      applySubagentEvent(state, { type: "session.renamed", created: 5, data: { sessionID: "ses_child", title: "New name" } })
-    ).toBe(true);
-    expect(state.children["ses_child"]?.title).toBe("New name");
+  test("sorts running first, then errors, then the newest", () => {
+    const children = [
+      session({ id: "ses_done_old", status: "idle", time: { created: 1_000, idle: 2_000 } }),
+      session({ id: "ses_running_old", status: "running", time: { created: 1_000 } }),
+      session({ id: "ses_error", status: "idle", outcome: "failed", time: { created: 1_500, idle: 2_500 } }),
+      session({ id: "ses_running_new", status: "running", time: { created: 3_000 } })
+    ];
+
+    const model = getSubagentSidebarModel(children, { now: 3_500 });
+
+    expect(model?.summary).toBe("2 running · 1 done · 1 error");
+    expect(model?.rows.map((row) => row.id)).toEqual(["ses_running_new", "ses_running_old", "ses_error", "ses_done_old"]);
   });
 
-  test("ignores partial events without throwing", () => {
-    const state = createSubagentState();
-    expect(applySubagentEvent(state, { type: "session.idle" })).toBe(false);
-    expect(applySubagentEvent(state, undefined)).toBe(false);
-    expect(applySubagentEvent(state, { type: "session.created", data: { parentID: "ses_root" } })).toBe(false);
-    expect(getSubagentSidebarModel(state, "ses_root")).toBeUndefined();
-  });
-});
+  test("prunes finished subagents after three idle minutes and keeps running ones", () => {
+    const children = [
+      session({ id: "ses_done_recent", status: "idle", time: { created: 1_000, idle: 120_000 } }),
+      session({ id: "ses_done_stale", status: "idle", time: { created: 1_000, idle: 60_000 } }),
+      session({ id: "ses_running_old", status: "running", time: { created: 1_000 } })
+    ];
 
-describe("subagent status", () => {
-  test("finds the sidebar row for either line of a rendered subagent", () => {
-    const model = {
-      title: "Subagents",
-      summary: "1 running · 1 done · 0 error",
-      rows: [
-        { id: "ses_first", title: "First", subtitle: "00:01", status: "running" as const },
-        { id: "ses_second", title: "Second", subtitle: "00:02", status: "done" as const }
-      ]
-    };
-
-    expect(getSubagentSidebarRowAtLine(model, 0)).toBeUndefined();
-    expect(getSubagentSidebarRowAtLine(model, 1)).toBeUndefined();
-    expect(getSubagentSidebarRowAtLine(model, 2)?.id).toBe("ses_first");
-    expect(getSubagentSidebarRowAtLine(model, 3)?.id).toBe("ses_first");
-    expect(getSubagentSidebarRowAtLine(model, 4)).toBeUndefined();
-    expect(getSubagentSidebarRowAtLine(model, 5)?.id).toBe("ses_second");
-    expect(getSubagentSidebarRowAtLine(model, 6)?.id).toBe("ses_second");
-  });
-
-  test("tracks running, completed, and failed subagents", () => {
-    const state = createSubagentState();
-
-    applySubagentEvent(state, {
-      type: "session.created",
-      created: 1_000,
-      data: { sessionID: "ses_child_1", parentID: "ses_parent", title: "Review tests" }
-    });
-    applySubagentEvent(state, {
-      type: "session.usage.updated",
-      created: 4_000,
-      data: { sessionID: "ses_child_1", tokens: { input: 100, output: 25 } }
-    });
-    applySubagentEvent(state, { type: "session.idle", created: 4_000, data: { sessionID: "ses_child_1" } });
-    applySubagentEvent(state, {
-      type: "session.created",
-      created: 2_000,
-      data: { sessionID: "ses_child_2", parentID: "ses_parent", title: "Run build" }
-    });
-    applySubagentEvent(state, { type: "session.execution.failed", created: 5_000, data: { sessionID: "ses_child_2" } });
-
-    expect(renderSubagentStatus(state, { now: 5_000 })).toBe(
-      "0 running · 1 done · 1 failed · 2 total · Run build 00:03 · Review tests 00:03 ctx 125 tokens"
-    );
-  });
-
-  test("renders the active parent session children in the sidebar", () => {
-    const state = createSubagentState();
-
-    applySubagentEvent(state, {
-      type: "session.created",
-      created: 1_000,
-      data: {
-        sessionID: "ses_child_running",
-        parentID: "ses_parent",
-        title: "Review tests and inspect flaky build logs"
-      }
-    });
-    applySubagentEvent(state, {
-      type: "session.usage.updated",
-      created: 3_000,
-      data: {
-        sessionID: "ses_child_running",
-        tokens: { input: 100, output: 25, reasoning: 10, cache: { read: 5, write: 1 } }
-      }
-    });
-    applySubagentEvent(state, {
-      type: "session.created",
-      created: 2_000,
-      data: { sessionID: "ses_child_done", parentID: "ses_parent", title: "Run build" }
-    });
-    applySubagentEvent(state, {
-      type: "session.usage.updated",
-      created: 4_000,
-      data: { sessionID: "ses_child_done", tokens: { input: 20, output: 5 } }
-    });
-    applySubagentEvent(state, { type: "session.idle", created: 5_000, data: { sessionID: "ses_child_done" } });
-    applySubagentEvent(state, {
-      type: "session.created",
-      created: 2_000,
-      data: { sessionID: "ses_other_child", parentID: "ses_other_parent", title: "Should not show" }
-    });
-
-    expect(renderSubagentSidebar(state, "ses_parent", { now: 6_000 })).toBe(
-      [
-        "Subagents",
-        "1 running · 1 done · 0 error",
-        "Review tests and ...flaky build logs",
-        "00:05 · ctx 141 tokens",
-        "Run build",
-        "00:03 · ctx 25 tokens"
-      ].join("\n")
-    );
-    expect(renderSubagentFooter(state, "ses_parent", { now: 6_000 })).toBe(
-      "Subagents 1 running · 1 done · 0 error"
-    );
-  });
-
-  test("omits the sidebar for parents without subagents", () => {
-    const state = createSubagentState();
-
-    applySubagentEvent(state, {
-      type: "session.created",
-      created: 1_000,
-      data: { sessionID: "ses_child_1", parentID: "ses_parent", title: "Review tests" }
-    });
-
-    expect(renderSubagentSidebar(state, "ses_other_parent")).toBe("");
-    expect(renderSubagentFooter(state, "ses_other_parent")).toBe("");
-  });
-
-  test("formats subagent row as title and subtitle using agent display name", () => {
-    const state = createSubagentState();
-
-    applySubagentEvent(state, {
-      type: "session.created",
-      created: 1_000,
-      data: { sessionID: "ses_child_1", parentID: "ses_parent", title: "✓General Task — Say hi subagent" }
-    });
-    applySubagentEvent(state, {
-      type: "session.usage.updated",
-      created: 4_000,
-      data: { sessionID: "ses_child_1", tokens: { input: 12, output: 8 } }
-    });
-
-    expect(getSubagentSidebarModel(state, "ses_parent", { now: 6_000 })).toEqual({
-      title: "Subagents",
-      summary: "1 running · 0 done · 0 error",
-      rows: [
-        {
-          id: "ses_child_1",
-          title: "General Task: Say hi subagent",
-          subtitle: "00:05 · ctx 20 tokens",
-          status: "running"
-        }
-      ]
-    });
-  });
-
-  test("prunes closed subagents after three idle minutes", () => {
-    const state = createSubagentState();
-
-    applySubagentEvent(state, {
-      type: "session.created",
-      created: 1_000,
-      data: { sessionID: "ses_done_recent", parentID: "ses_parent", title: "Recent done" }
-    });
-    applySubagentEvent(state, { type: "session.idle", created: 120_000, data: { sessionID: "ses_done_recent" } });
-    applySubagentEvent(state, {
-      type: "session.created",
-      created: 1_000,
-      data: { sessionID: "ses_done_stale", parentID: "ses_parent", title: "Stale done" }
-    });
-    applySubagentEvent(state, { type: "session.idle", created: 60_000, data: { sessionID: "ses_done_stale" } });
-    applySubagentEvent(state, {
-      type: "session.created",
-      created: 1_000,
-      data: { sessionID: "ses_running_old", parentID: "ses_parent", title: "Still running" }
-    });
-    applySubagentEvent(state, { type: "session.status", created: 60_000, data: { sessionID: "ses_running_old", status: { type: "busy" } } });
-
-    expect(pruneStaleSubagents(state, { now: 240_001 })).toBe(true);
-    expect(getSubagentSidebarModel(state, "ses_parent", { now: 240_001 })?.rows.map((row) => row.id)).toEqual([
+    expect(getSubagentSidebarModel(children, { now: 240_001 })?.rows.map((row) => row.id)).toEqual([
       "ses_running_old",
       "ses_done_recent"
     ]);
   });
+
+  test("omits the section when there are no child sessions", () => {
+    expect(getSubagentSidebarModel([], { now: 1 })).toBeUndefined();
+  });
+
+  test("titles a row with the native agent and task", () => {
+    const child = session({ title: "Review tests", agent: "general" });
+    expect(getSubagentSidebarModel([child], { now: 6_000 })?.rows[0]?.title).toBe("general: Review tests");
+
+    const suffixed = session({ title: "Final performance review (@general subagent)", agent: "general" });
+    expect(getSubagentSidebarModel([suffixed], { now: 6_000 })?.rows[0]?.title).toBe("general: Final performance review");
+
+    const long = session({ title: "Review tests and inspect the flaky build logs", agent: "general" });
+    const title = getSubagentSidebarModel([long], { now: 6_000 })?.rows[0]?.title ?? "";
+    expect(title.length).toBeLessThanOrEqual(36);
+    expect(title).toContain("...");
+  });
+});
+
+describe("subagent token totals", () => {
+  test("sums either the native token fields or a plain input/output pair", () => {
+    expect(sumSubagentTokens([session({ tokens: { input: 12, output: 8 } })])).toBe(20);
+    expect(
+      sumSubagentTokens([
+        session({ tokens: { input: 1, output: 2, reasoning: 3, cache: { read: 4, write: 5 } } }),
+        session({ id: "ses_b" })
+      ])
+    ).toBe(15);
+  });
+
+  test("shows the native total abbreviated next to the duration", () => {
+    const small = session({ tokens: { input: 100, output: 25, reasoning: 10, cache: { read: 5, write: 1 } } });
+    expect(getSubagentSidebarModel([small], { now: 6_000 })?.rows[0]?.subtitle).toBe("00:05 · 141 tokens");
+
+    const large = session({ tokens: { input: 12_345, output: 1 } });
+    expect(getSubagentSidebarModel([large], { now: 6_000 })?.rows[0]?.subtitle).toBe("00:05 · 12.3k tokens");
+  });
+
+  test("omits the token part when the host reports none", () => {
+    const child = session({ time: { created: 1_000 } });
+    expect(getSubagentSidebarModel([child], { now: 6_000 })?.rows[0]?.subtitle).toBe("00:05");
+  });
 });
 
 describe("subagent activity suffix", () => {
-  test("appends activity suffix to the row subtitle", () => {
+  test("appends the activity recorded for that child session", () => {
     const activity = createActivityState();
-    const state = createSubagentState(activity);
-    recordToolPart(activity, "ses_child_1", { id: "prt_1", tool: "bash" });
-    recordToolPart(activity, "ses_child_1", { id: "prt_2", tool: "read" });
+    recordToolPart(activity, "ses_child", { id: "prt_1", tool: "bash" });
+    recordToolPart(activity, "ses_child", { id: "prt_2", tool: "read" });
 
-    applySubagentEvent(state, {
-      type: "session.created",
-      created: 1_000,
-      data: { sessionID: "ses_child_1", parentID: "ses_parent", title: "Review tests" }
-    });
-    applySubagentEvent(state, {
-      type: "session.usage.updated",
-      created: 1_000,
-      data: { sessionID: "ses_child_1", tokens: { input: 12, output: 8 } }
-    });
+    const child = session({ tokens: { input: 12, output: 8 } });
+    const model = getSubagentSidebarModel([child], { now: 6_000, activity: (id) => activity.bySessionID[id] });
 
-    expect(getSubagentSidebarModel(state, "ses_parent", { now: 6_000 })?.rows[0]?.subtitle).toBe(
-      "00:05 · ctx 20 tokens · 2 tool calls"
-    );
+    expect(model?.rows[0]?.subtitle).toBe("00:05 · 20 tokens · 2 tool calls");
   });
 
-  test("keeps subtitle unchanged when the subagent has no activity", () => {
-    const activity = createActivityState();
-    const state = createSubagentState(activity);
+  test("keeps the subtitle unchanged when the subagent has no activity", () => {
+    const child = session({ tokens: { input: 12, output: 8 } });
+    const model = getSubagentSidebarModel([child], { now: 6_000, activity: () => undefined });
 
-    applySubagentEvent(state, {
-      type: "session.created",
-      created: 1_000,
-      data: { sessionID: "ses_child_1", parentID: "ses_parent", title: "Review tests" }
-    });
-    applySubagentEvent(state, {
-      type: "session.usage.updated",
-      created: 1_000,
-      data: { sessionID: "ses_child_1", tokens: { input: 12, output: 8 } }
-    });
-
-    expect(getSubagentSidebarModel(state, "ses_parent", { now: 6_000 })?.rows[0]?.subtitle).toBe(
-      "00:05 · ctx 20 tokens"
-    );
-  });
-
-  test("attaches a live activity record created on demand", () => {
-    const activity = createActivityState();
-    const state = createSubagentState(activity);
-
-    applySubagentEvent(state, {
-      type: "session.created",
-      created: 1_000,
-      data: { sessionID: "ses_child_1", parentID: "ses_parent", title: "X" }
-    });
-
-    expect(activity.bySessionID["ses_child_1"]).toBeDefined();
-    expect(state.children["ses_child_1"]?.activity).toBe(activity.bySessionID["ses_child_1"]);
+    expect(model?.rows[0]?.subtitle).toBe("00:05 · 20 tokens");
   });
 });

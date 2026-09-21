@@ -17,7 +17,7 @@ import {
   type SessionAnalysisRow
 } from "./activity.js";
 import { selectAnalysisDialogLayout, selectDialogSize } from "./dialog-size.js";
-import { createSubagentState, getSubagentSidebarModel, sumSubagentTokens } from "./subagents.js";
+import { getSubagentSidebarModel, sumSubagentTokens } from "./subagents.js";
 import {
   createGoUsageRefresher,
   formatGoUsageRow,
@@ -66,12 +66,15 @@ function Section(props: {
 }
 
 function TokenUsageSection(props: { sessionID: string; state: InsightState; version: number }) {
-  const theme = usePlugin().theme;
+  const context = usePlugin();
+  const theme = context.theme;
   const [collapsed, setCollapsed] = createSignal(false);
   const lines = createMemo(() => {
     props.version;
-    const subagents = sumSubagentTokens(props.state.subagents, props.sessionID);
-    const content = renderSessionTokenUsage(props.state.metrics, props.sessionID, subagents);
+    // Subagent totals come from the host's session store, the same source the
+    // Subagents section reads its rows from.
+    const children = context.data.session.list().filter((session) => session.parentID === props.sessionID);
+    const content = renderSessionTokenUsage(props.state.metrics, props.sessionID, sumSubagentTokens(children));
     return content.length > 0 ? content.split("\n") : [];
   });
 
@@ -235,9 +238,37 @@ function SubagentsSection(props: { sessionID: string; state: InsightState; versi
   const theme = context.theme;
   const [collapsed, setCollapsed] = createSignal(false);
   const [hovered, setHovered] = createSignal<string | undefined>();
+  // The host's idle stamp can lag its store, so a child that has already stopped
+  // keeps the duration it had when we first saw it stop instead of never stopping.
+  const idleSeenAt = new Map<string, number>();
+  const observedIdleAt = (id: string) => {
+    const seen = idleSeenAt.get(id);
+    if (seen !== undefined) return seen;
+    const at = Date.now();
+    idleSeenAt.set(id, at);
+    return at;
+  };
   const model = createMemo(() => {
     props.version;
-    return getSubagentSidebarModel(props.state.subagents, props.sessionID, { now: Date.now() });
+    // The host's session store is the source of truth: liveness is
+    // `data.session.status()`, identity and timings are `SessionInfo` fields.
+    const sessions = context.data.session.list();
+    const children = sessions
+      .filter((session) => session.parentID === props.sessionID)
+      .map((session) => ({
+        id: session.id,
+        title: session.title,
+        agent: session.agent,
+        outcome: session.outcome,
+        status: context.data.session.status(session.id),
+        time: session.time,
+        tokens: session.tokens
+      }));
+    return getSubagentSidebarModel(children, {
+      now: Date.now(),
+      activity: (id) => props.state.activity.bySessionID[id],
+      observedIdleAt
+    });
   });
 
   return (
@@ -374,7 +405,6 @@ async function setup(context: Context) {
   const state = createInsightState({
     metrics: createMetricsState(),
     activity,
-    subagents: createSubagentState(activity),
     goProviders: createGoProviderTracker(),
     copilotProviders: createCopilotProviderTracker()
   });
