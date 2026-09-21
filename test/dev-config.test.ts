@@ -41,4 +41,19 @@ describe("dev deploy config transforms", () => {
     expect(readPluginSpecs('{\n  "plugins": ["a", 2, "b"]\n}\n')).toEqual(["a", "b"]);
     expect(readPluginSpecs('{\n  "other": true\n}\n')).toEqual([]);
   });
+
+  test("addLocalPlugin removes legacy alias paths", () => {
+    const source = '{\n  "plugins": ["superpowers@x", "/Users/me/opencode-insights"]\n}\n';
+    const result = addLocalPlugin(source, "/Users/me/opencode-insights/dev", ["/Users/me/opencode-insights"]);
+    expect(result.plugins).toEqual(["superpowers@x", "/Users/me/opencode-insights/dev"]);
+  });
+
+  test("revertLocalPlugin removes alias paths too", () => {
+    const source =
+      '{\n  "plugins": ["/Users/me/opencode-insights/dev", "/Users/me/opencode-insights", "superpowers@x"]\n}\n';
+    const result = revertLocalPlugin(source, "/Users/me/opencode-insights/dev", OFFICIAL, [
+      "/Users/me/opencode-insights"
+    ]);
+    expect(result.plugins).toEqual(["superpowers@x", OFFICIAL]);
+  });
 });

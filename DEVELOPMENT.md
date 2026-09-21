@@ -22,11 +22,17 @@ The plugin only runs inside OpenCode V2. To try a local build:
    npm run debug
    ```
 
-   This builds, then adds this repository's absolute path to `plugins` in
-   `~/.config/opencode/opencode.jsonc` (backing the file up to `opencode.jsonc.bak`
-   and preserving comments). Preview without writing with
+   This builds, then adds this repository's `dev/` plugin directory to `plugins`
+   in `~/.config/opencode/opencode.jsonc` (backing the file up to
+   `opencode.jsonc.bak` and preserving comments). Preview without writing with
    `npm run debug -- --dry-run`. Point it at another config with
    `npm run debug -- --config /path/to/opencode.jsonc`.
+
+   Why `dev/` and not the repo root: OpenCode V2 registers a plugin directory
+   only when it exposes a `server` (or `index`) entrypoint, and loads the TUI
+   component from its `tui` entrypoint. A directory without a server entrypoint
+   is dropped silently. `dev/index.ts` is a no-op server stub and `dev/tui.ts`
+   re-exports `dist/tui.js`, so the folder satisfies both.
 
 2. Restart OpenCode.
 
@@ -38,16 +44,13 @@ The plugin only runs inside OpenCode V2. To try a local build:
    npm run revert-debug
    ```
 
-   This removes the local path and adds `@rejacky/opencode-insights@latest`.
-
-If V2 refuses the local folder, the fallback is a local plugin file: create
-`~/.config/opencode/plugins/opencode-insights-dev.ts` containing
-`export { default } from "/absolute/path/to/opencode-insights/dist/tui.js";`
-and remove the local entry from `opencode.jsonc`.
+   This removes the local path (and any stale repo-root entry) and adds
+   `@rejacky/opencode-insights@latest`.
 
 ## Layout
 
 - `src/tui.tsx` — the plugin entrypoint and all Solid components.
+- `dev/` — dev-only plugin directory for `npm run debug` (`index.ts` server stub, `tui.ts` TUI re-export). Not published.
 - `src/events.ts` — pure V2 event → state bridge (unit-tested).
 - `src/config.ts` — `config.jsonc` parsing.
 - `src/metrics.ts`, `src/activity.ts`, `src/subagents.ts`, `src/go-usage.ts`, `src/copilot-usage.ts` — pure logic.

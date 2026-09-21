@@ -4,9 +4,11 @@
 //   node scripts/dev.js debug   [--dry-run] [--config <opencode.jsonc>]
 //   node scripts/dev.js revert  [--dry-run] [--config <opencode.jsonc>]
 //
-// OpenCode V2 resolves a plugin from a package folder, so the local entry is this
-// repository root (resolved through package.json "exports"). Run `npm run build`
-// first: `npm run debug` does that for you.
+// OpenCode V2 registers a plugin directory from `plugins` only if the directory
+// exposes a `server` (or `index`) entrypoint, and loads the TUI component from
+// its `tui` entrypoint. The dev entry therefore lives in ./dev, not the repo
+// root: dev/index.ts is a no-op server stub and dev/tui.ts re-exports dist.
+// Run `npm run build` first: `npm run debug` does that for you.
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -15,7 +17,10 @@ import { addLocalPlugin, readPluginSpecs, revertLocalPlugin } from "./dev-config
 
 const OFFICIAL_SPEC = "@rejacky/opencode-insights@latest";
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const localPath = join(repoRoot, "dev");
 const distEntry = join(repoRoot, "dist", "tui.js");
+// Older builds pointed `plugins` at the repo root; drop that stale entry on deploy.
+const legacyPaths = [repoRoot];
 
 function parseArgs(argv) {
   const args = { command: argv[0], dryRun: false, config: undefined };
@@ -48,11 +53,11 @@ const source = readFileSync(configPath, "utf8");
 const before = readPluginSpecs(source);
 const result =
   args.command === "debug"
-    ? addLocalPlugin(source, repoRoot)
-    : revertLocalPlugin(source, repoRoot, OFFICIAL_SPEC);
+    ? addLocalPlugin(source, localPath, legacyPaths)
+    : revertLocalPlugin(source, localPath, OFFICIAL_SPEC, legacyPaths);
 
 console.log(`${args.command}: ${configPath}`);
-console.log(`  local plugin: ${repoRoot}`);
+console.log(`  local plugin: ${localPath}`);
 if (args.dryRun) {
   console.log("  --dry-run: no changes written");
 } else if (result.changed) {
