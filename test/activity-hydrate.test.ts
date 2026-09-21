@@ -59,6 +59,33 @@ describe("hydrateInsights", () => {
     expect(s.activity.hydrated.has("ses_child")).toBe(true);
   });
 
+  test("uses the persisted streamed window for the hydrated average", async () => {
+    const s = state();
+    const data: ActivityData = {
+      session: {
+        list: () => [{ id: "ses_root" }],
+        message: {
+          sync: async () => {},
+          list: () => [
+            {
+              type: "assistant",
+              id: "msg_1",
+              time: { created: 1_000, streamed: 5_000, completed: 5_200 },
+              tokens: { input: 10, output: 40, reasoning: 10, cache: { read: 0, write: 0 } },
+              content: []
+            }
+          ]
+        }
+      }
+    };
+
+    await hydrateInsights(data, s, "ses_root");
+
+    // 50 tokens over the persisted 4s streamed window (1000 -> 5000), matching
+    // the native message header rather than the shorter completed-created span.
+    expect(s.metrics.messageMetricsByID["msg_1"]).toMatchObject({ totalTokens: 50, durationMs: 4_000 });
+  });
+
   test("does not create a subagent row for a session without a parent", async () => {
     const s = state();
     const data: ActivityData = {

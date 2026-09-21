@@ -10,6 +10,7 @@ export type MessageTiming = {
   firstTokenAt?: number | undefined;
   lastTokenAt?: number | undefined;
   lastToolCallAt?: number | undefined;
+  streamedAt?: number | undefined;
 };
 
 export type SessionAverage = {
@@ -21,8 +22,11 @@ export type SessionAverage = {
 
 /**
  * Per-message metrics for input-box (current round).
- * AVG = totalTokens(=output+reasoning)/duration where duration = firstTokenAt→endAt (fallback completed-created if hydrated).
- * TTFT = firstTokenAt - requestStartAt. TPS = live estimated tokens / active burst duration (5s window) for this messageID only.
+ * AVG mirrors the native message header's `tok/s`: (output+reasoning) tokens over
+ * `time.streamed - time.created`, i.e. step start → stream end, which includes the
+ * reasoning phase and TTFT. Falls back to completed-created when streamed is unknown.
+ * TTFT = first token of any kind (text or reasoning) - requestStartAt. TPS = live
+ * estimated tokens / active burst duration (5s window) for this messageID only.
  * Session totals (Token Usage sidebar) remain in SessionTokenUsage/sessionAverageByID (deprecated for prompt-right).
  */
 export type MessageMetrics = {
@@ -101,6 +105,7 @@ export function recordAssistantMessage(
     messageID: string;
     createdAt: number;
     completedAt?: number;
+    streamedAt?: number | undefined;
     outputTokens?: number;
     reasoningTokens?: number;
     inputTokens?: number;
@@ -113,7 +118,9 @@ export function recordAssistantMessage(
     const existing = state.messageTimingByID[input.messageID];
     state.messageTimingByID[input.messageID] = {
       sessionID: input.sessionID,
-      requestStartAt: input.createdAt,
+      // Message-wide, like the host's `time.created`: the first step start wins,
+      // so a later step (or retry) never shifts TTFT or the averaging window.
+      requestStartAt: existing?.requestStartAt ?? input.createdAt,
       firstResponseAt: existing?.firstResponseAt,
       firstTokenAt: existing?.firstTokenAt,
       lastTokenAt: existing?.lastTokenAt,
@@ -149,12 +156,16 @@ export function recordAssistantMessage(
 
   if (timing?.sessionID === input.sessionID && typeof (timing.firstTokenAt ?? timing.firstResponseAt) === "number") {
     const first = timing.firstTokenAt ?? timing.firstResponseAt!;
-    const endAt = input.finish === "tool-calls" ? (timing.lastToolCallAt ?? input.completedAt) : input.completedAt;
-    durationMs = typeof endAt === "number" ? Math.max(endAt - first, 1) : undefined;
+    // Native parity: the average covers the step's streaming window
+    // (step start -> stream end), which includes TTFT and the reasoning phase.
+    const streamed = input.streamedAt ?? timing.streamedAt;
+    const endAt = streamed ?? (input.finish === "tool-calls" ? (timing.lastToolCallAt ?? input.completedAt) : input.completedAt);
+    durationMs = typeof endAt === "number" ? Math.max(endAt - timing.requestStartAt, 1) : undefined;
     ttftMs = Math.max(first - timing.requestStartAt, 0);
   } else {
-    // Hydration or race: no timing, fallback to wall time
-    durationMs = Math.max(input.completedAt - input.createdAt, 1);
+    // Hydration or race: no stream timing, fallback to the persisted streamed span then wall time
+    const endAt = input.streamedAt ?? input.completedAt;
+    durationMs = Math.max(endAt - input.createdAt, 1);
     ttftMs = undefined;
   }
 
@@ -168,42 +179,24 @@ export function recordAssistantMessage(
     };
 
     // Keep sessionAverageByID for backward compat / sidebar analytics (weighted throughput)
-    if (ttftMs !== undefined) {
-      const firstForSession = timing?.firstTokenAt ?? timing?.firstResponseAt;
-      const endForSession = timing ? (input.finish === "tool-calls" ? (timing.lastToolCallAt ?? input.completedAt) : input.completedAt) : input.completedAt;
-      const sessionDuration = timing && firstForSession && typeof endForSession === "number" ? Math.max(endForSession - firstForSession, 1) : durationMs;
-      const sessionTtft = ttftMs;
-      const totals =
-        state.sessionAverageByID[input.sessionID] ??
-        {
-          totalTokens: 0,
-          totalDurationMs: 0,
-          totalTtftMs: 0,
-          messageCount: 0
-        };
-      state.sessionAverageByID[input.sessionID] = {
-        totalTokens: totals.totalTokens + totalTokens,
-        totalDurationMs: totals.totalDurationMs + sessionDuration,
-        totalTtftMs: totals.totalTtftMs + sessionTtft,
-        messageCount: totals.messageCount + 1
+    const totals =
+      state.sessionAverageByID[input.sessionID] ??
+      {
+        totalTokens: 0,
+        totalDurationMs: 0,
+        totalTtftMs: 0,
+        messageCount: 0
       };
-    } else {
-      // Hydrated without TTFT: still count tokens/duration but not TTFT (do not dilute session TTFT average)
-      const totals =
-        state.sessionAverageByID[input.sessionID] ??
-        {
-          totalTokens: 0,
-          totalDurationMs: 0,
-          totalTtftMs: 0,
-          messageCount: 0
-        };
-      state.sessionAverageByID[input.sessionID] = {
-        totalTokens: totals.totalTokens + totalTokens,
-        totalDurationMs: totals.totalDurationMs + durationMs,
-        totalTtftMs: totals.totalTtftMs,
-        messageCount: totals.messageCount
-      };
-    }
+    // Same weighed average as the per-message metric, so the session fallback
+    // stays consistent with the native tok/s window.
+    state.sessionAverageByID[input.sessionID] = {
+      totalTokens: totals.totalTokens + totalTokens,
+      totalDurationMs: totals.totalDurationMs + durationMs,
+      totalTtftMs: totals.totalTtftMs + (ttftMs ?? 0),
+      // Messages hydrated without TTFT still count tokens/duration but never
+      // dilute the TTFT average.
+      messageCount: totals.messageCount + (ttftMs !== undefined ? 1 : 0)
+    };
   }
 
   delete state.messageTimingByID[input.messageID];
@@ -244,6 +237,18 @@ export function recordAssistantDelta(
           lastTokenAt: input.at
         };
   }
+}
+
+/**
+ * Records the `session.step.streamed` timestamp. The native message header
+ * derives its tok/s from `time.streamed - time.created`, so this is the window
+ * our average must use to stay consistent with it.
+ */
+export function recordStreamedAt(state: MetricsState, messageID: string, at: number): boolean {
+  const timing = state.messageTimingByID[messageID];
+  if (!timing) return false;
+  state.messageTimingByID[messageID] = { ...timing, streamedAt: at };
+  return true;
 }
 
 export function recordToolActivity(state: MetricsState, sessionID: string, messageID: string, at = Date.now()) {

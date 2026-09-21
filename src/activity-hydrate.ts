@@ -151,6 +151,7 @@ function applyMessage(state: HydrationState, sessionID: string, message: Record<
     const time = isRecord(message.time) ? message.time : {};
     const createdAt = numberFrom(time.created);
     const completedAt = numberFrom(time.completed) ?? createdAt;
+    const streamedAt = numberFrom(time.streamed);
     const finish = stringFrom(message.finish);
     if (messageID !== undefined && createdAt !== undefined && completedAt !== undefined) {
       recordAssistantMessage(state.metrics, {
@@ -158,6 +159,7 @@ function applyMessage(state: HydrationState, sessionID: string, message: Record<
         messageID,
         createdAt,
         completedAt,
+        ...(streamedAt !== undefined ? { streamedAt } : {}),
         ...tokenUsage(message.tokens),
         ...(finish !== undefined ? { finish } : {})
       });

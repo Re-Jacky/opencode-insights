@@ -37,14 +37,14 @@ Then reinstall by restarting OpenCode, or bump the version in `cli.json` if you 
 
 ## What You Get
 
-- **Prompt metrics** on their own line directly above the composer, configurable and ordered by `promptRightMetrics`.
+- **Prompt metrics** on their own line directly above the composer, configurable and ordered by `promptRightMetrics`. `tps` is a live estimate over a 5s window while the model streams (reasoning deltas included, so it shows while the model is thinking); `avg` uses the same window as the native message header's `tok/s`; `ttft` is the time to the first token of any kind.
 - **Token Usage** sidebar: session-wide totals, response count, input/output/reasoning, cache read/write, and aggregate cache rate. It hydrates completed responses already present in the session and keeps updating live.
 - **Go Usage** sidebar (opt-in): OpenCode Go rolling/weekly/monthly limits, shown only when the session uses the `opencode-go` provider.
 - **Copilot Usage** sidebar (opt-in): GitHub Copilot premium-interaction quota, usage bar, and days until reset, shown only when the session uses the `github-copilot` provider.
 - **Subagents** sidebar: running/done/failed status, elapsed time, token/context usage, and per-subagent activity. Click a row to open that subagent session.
 - **Session Analysis** sidebar: aggregated tool calls, skills, auto-compactions, model requests, warnings, and the subagent tree. Click the header to open a scrollable detail dialog.
 
-Click any section header to collapse or expand it. Prompt-right `used` and `cache` values reflect the latest completed assistant response; the Token Usage sidebar aggregates the whole session.
+Click any section header to collapse or expand it. Prompt `used` and `cache` values reflect the latest completed assistant response; the Token Usage sidebar aggregates the whole session.
 
 ## Configuration
 

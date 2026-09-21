@@ -47,7 +47,38 @@ describe("metrics tracking", () => {
     });
 
     expect(renderMetricsText(state, "ses_1", { now: 2_750, idle: false })).toBe(
-      "TPS 16.0 TPS | AVG 33.3 | TTFT 0.5s"
+      "TPS 16.0 TPS | AVG 25.0 | TTFT 0.5s"
+    );
+  });
+
+  test("averages over the streamed step window like the native prompt", () => {
+    const state = createMetricsState();
+
+    recordAssistantMessage(state, {
+      sessionID: "ses_1",
+      messageID: "msg_1",
+      createdAt: 1_000
+    });
+    recordAssistantDelta(state, {
+      sessionID: "ses_1",
+      messageID: "msg_1",
+      delta: "x".repeat(50),
+      at: 4_000
+    });
+    recordAssistantMessage(state, {
+      sessionID: "ses_1",
+      messageID: "msg_1",
+      createdAt: 1_000,
+      streamedAt: 5_000,
+      completedAt: 5_100,
+      outputTokens: 40,
+      reasoningTokens: 10
+    });
+
+    // 50 tokens over the 4s streamed window (1000 -> 5000), TTFT to the first
+    // token at 4000 - matching the native message header's tok/s.
+    expect(renderPromptRightMetricsText(state, "ses_1", { idle: true, metrics: ["avg", "ttft"] })).toBe(
+      "AVG 12.5 | TTFT 3.0s"
     );
   });
 

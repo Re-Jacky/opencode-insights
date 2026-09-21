@@ -34,6 +34,110 @@ describe("applyInsightEvent", () => {
     expect(s.metrics.streamSamplesByMessageID["msg_1"]?.length).toBe(1);
   });
 
+  test("records reasoning deltas so the thinking phase is measured", () => {
+    const { state: s } = state();
+    applyInsightEvent(s, {
+      type: "session.step.started",
+      created: 1_000,
+      data: { sessionID: "ses_a", assistantMessageID: "msg_1", started: 1_000 }
+    });
+    const result = applyInsightEvent(s, {
+      type: "session.reasoning.delta",
+      created: 1_400,
+      data: { sessionID: "ses_a", assistantMessageID: "msg_1", delta: "thinking hard" }
+    });
+
+    expect(result.metrics).toBe(true);
+    expect(s.metrics.streamSamplesByMessageID["msg_1"]?.length).toBe(1);
+    // The first token of any kind starts TTFT, so reasoning time counts.
+    expect(s.metrics.messageTimingByID["msg_1"]?.firstTokenAt).toBe(1_400);
+  });
+
+  test("averages over the step streaming window like the native prompt", () => {
+    const { state: s } = state();
+    applyInsightEvent(s, {
+      type: "session.step.started",
+      created: 1_000,
+      data: { sessionID: "ses_a", assistantMessageID: "msg_1", started: 1_000 }
+    });
+    applyInsightEvent(s, {
+      type: "session.text.delta",
+      created: 4_000,
+      data: { sessionID: "ses_a", assistantMessageID: "msg_1", delta: "x".repeat(50) }
+    });
+    applyInsightEvent(s, {
+      type: "session.step.streamed",
+      created: 5_000,
+      data: { sessionID: "ses_a", assistantMessageID: "msg_1" }
+    });
+    applyInsightEvent(s, {
+      type: "session.step.ended",
+      created: 5_100,
+      data: {
+        sessionID: "ses_a",
+        assistantMessageID: "msg_1",
+        finish: "stop",
+        tokens: { input: 10, output: 40, reasoning: 10, cache: { read: 0, write: 0 } }
+      }
+    });
+
+    // 50 tokens over the 4s streaming window (step start 1000 -> streamed 5000),
+    // with TTFT measured to the first token at 4000, not to the stream end.
+    expect(s.metrics.messageMetricsByID["msg_1"]).toMatchObject({
+      totalTokens: 50,
+      durationMs: 4_000,
+      ttftMs: 3_000
+    });
+  });
+
+  test("keeps the first step start so a later step does not shift TTFT or the window", () => {
+    const { state: s } = state();
+    applyInsightEvent(s, {
+      type: "session.step.started",
+      created: 1_000,
+      data: { sessionID: "ses_a", assistantMessageID: "msg_1", started: 1_000 }
+    });
+    applyInsightEvent(s, {
+      type: "session.reasoning.delta",
+      created: 1_400,
+      data: { sessionID: "ses_a", assistantMessageID: "msg_1", delta: "thinking" }
+    });
+    applyInsightEvent(s, {
+      type: "session.step.streamed",
+      created: 2_000,
+      data: { sessionID: "ses_a", assistantMessageID: "msg_1" }
+    });
+    // Tool step ends without completing the message, then the next step streams.
+    applyInsightEvent(s, {
+      type: "session.step.started",
+      created: 3_000,
+      data: { sessionID: "ses_a", assistantMessageID: "msg_1", started: 3_000 }
+    });
+    applyInsightEvent(s, {
+      type: "session.step.streamed",
+      created: 5_000,
+      data: { sessionID: "ses_a", assistantMessageID: "msg_1" }
+    });
+    applyInsightEvent(s, {
+      type: "session.step.ended",
+      created: 5_100,
+      data: {
+        sessionID: "ses_a",
+        assistantMessageID: "msg_1",
+        finish: "stop",
+        tokens: { input: 10, output: 40, reasoning: 10, cache: { read: 0, write: 0 } }
+      }
+    });
+
+    // Window spans first step start -> stream end (1000 -> 5000), TTFT points at
+    // the first token of any kind (1400 - 1000), exactly like the host's
+    // `time.created`/`time.streamed` pair.
+    expect(s.metrics.messageMetricsByID["msg_1"]).toMatchObject({
+      durationMs: 4_000,
+      ttftMs: 400
+    });
+  });
+
   test("does not double-count tokens across multiple steps of one assistant message", () => {
     const { state: s } = state();
     applyInsightEvent(s, {

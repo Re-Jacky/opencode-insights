@@ -4,6 +4,7 @@ import type { GoProviderTracker } from "./go-usage.js";
 import {
   recordAssistantDelta,
   recordAssistantMessage,
+  recordStreamedAt,
   recordToolActivity,
   type MetricsState
 } from "./metrics.js";
@@ -106,11 +107,18 @@ export function applyInsightEvent(state: InsightState, event: unknown): InsightE
   };
 
   switch (type) {
-    case "session.text.delta": {
+    case "session.text.delta":
+    case "session.reasoning.delta": {
       const delta = str(data.delta);
       if (!sessionID || !messageID || delta === undefined) break;
       recordAssistantDelta(state.metrics, { sessionID, messageID, delta, at: created });
       result.metrics = true;
+      break;
+    }
+    case "session.step.streamed": {
+      // Marks the end of the model's streaming window, which is the denominator
+      // the native message header uses for its tok/s average.
+      if (recordStreamedAt(state.metrics, messageID ?? "", created)) result.metrics = true;
       break;
     }
     case "session.step.started": {
