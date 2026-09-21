@@ -17,7 +17,8 @@ OpenCode V2 TUI plugin `@rejacky/opencode-insights` — reactive sidebar section
 - Tests import from `src/` directly, never from `dist/`.
 - `exactOptionalPropertyTypes` is on: optional fields are explicitly `T | undefined`, and optional JSX/object props are built with conditional spreads (`{...(cond ? { x } : {})}`) rather than passing `undefined`.
 - `test/tui.test.ts` verifies TUI wiring by reading `src/tui.tsx` as text and asserting on identifiers and literals (`Plugin.define({`, `context.data.listen(`, `append: "sidebar.content"`, `context.ui.router.navigate({ type: "session", sessionID: row.id })`, …). Renaming those breaks the test.
-- JSX uses `@opentui/solid` as import source (set in both tsconfig.json and tsup.config.ts).
+- JSX is compiled by `babel-preset-solid` (`generate: "universal"`, module `@opentui/solid`) via `scripts/solid-jsx.js`, wired into `tsup.config.ts` as an esbuild `onLoad` plugin. Do **not** switch back to esbuild's JSX runtime: esbuild emits plain prop values, and Solid reads a plain prop once — every `Show`/`For`/`when`/`each`/dynamic prop then freezes (collapsing headers, hover, live metrics all stop updating). `babel-preset-solid` emits accessor getters, which is what the runtime tracks. `test/solid-jsx.test.ts` guards this. `jsxImportSource` in tsconfig.json only serves the `jsx: "preserve"` typecheck.
+- The runtime applies the same Solid transform to `.tsx` plugin sources and rewrites bare `solid-js`/`@opentui/solid` to its own bundled client builds; keep those imports bare so the host can rewrite them.
 
 ## Architecture
 
