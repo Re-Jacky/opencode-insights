@@ -8,6 +8,7 @@ OpenCode V2 TUI plugin `@rejacky/opencode-insights` — reactive sidebar section
 - `npm run typecheck` — `tsc --noEmit` (strict + `noUncheckedIndexedAccess` + `exactOptionalPropertyTypes`).
 - `npm test` — `vitest run` (tests live in `test/**/*.test.ts`, `restoreMocks: true`).
 - `npm run build` — tsup, ESM-only, one entry (`tui`). `@opencode/plugin`, `@opentui/*`, `solid-js` are externalized.
+- `npm run debug` — builds, then points this repo's absolute path into `plugins` in `~/.config/opencode/opencode.jsonc` (dev only, `scripts/` is not published); `npm run revert-debug` restores `@rejacky/opencode-insights@latest`. Both accept `--dry-run` and `--config <path>`.
 - No linter or formatter is configured.
 
 ## Conventions

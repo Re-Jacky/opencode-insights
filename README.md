@@ -4,10 +4,9 @@ Live OpenCode TUI sidebars for token/TPS metrics, session analysis, subagent sta
 
 ## Install
 
-Add the plugin to OpenCode's CLI plugin list:
+Add the plugin to OpenCode's plugin list in `~/.config/opencode/opencode.jsonc`:
 
 ```jsonc
-// ~/.config/opencode/cli.json
 {
   "plugins": ["@rejacky/opencode-insights"]
 }

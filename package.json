@@ -16,6 +16,11 @@
   "main": "./dist/tui.js",
   "types": "./dist/tui.d.ts",
   "exports": {
+    ".": {
+      "types": "./dist/tui.d.ts",
+      "import": "./dist/tui.js",
+      "default": "./dist/tui.js"
+    },
     "./tui": {
       "types": "./dist/tui.d.ts",
       "import": "./dist/tui.js",
@@ -33,6 +38,8 @@
   },
   "scripts": {
     "build": "tsup",
+    "debug": "npm run build && node scripts/dev.js debug",
+    "revert-debug": "node scripts/dev.js revert",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
     "verify": "npm run typecheck && npm run test && npm run build",

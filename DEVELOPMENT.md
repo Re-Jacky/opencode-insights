@@ -16,27 +16,34 @@
 
 The plugin only runs inside OpenCode V2. To try a local build:
 
-1. Build it:
+1. Deploy the local build into your OpenCode plugin list:
 
    ```bash
-   npm run build
+   npm run debug
    ```
 
-2. Point OpenCode at the local build by adding its absolute `dist/tui.js` path to `~/.config/opencode/cli.json`:
+   This builds, then adds this repository's absolute path to `plugins` in
+   `~/.config/opencode/opencode.jsonc` (backing the file up to `opencode.jsonc.bak`
+   and preserving comments). Preview without writing with
+   `npm run debug -- --dry-run`. Point it at another config with
+   `npm run debug -- --config /path/to/opencode.jsonc`.
 
-   ```jsonc
-   {
-     "plugins": ["/absolute/path/to/opencode-insights/dist/tui.js"]
-   }
+2. Restart OpenCode.
+
+3. Open a session and confirm the sidebar sections render: `Token Usage`, `Subagents`, and `Session Analysis`. `Go Usage`/`Copilot Usage` appear only when enabled in `~/.opencode-insights/config.jsonc` and the session uses the matching provider. Confirm the prompt-right metrics row appears in the prompt footer.
+
+4. When you are done, restore the published package:
+
+   ```bash
+   npm run revert-debug
    ```
 
-3. Restart OpenCode.
+   This removes the local path and adds `@rejacky/opencode-insights@latest`.
 
-4. Open a session and confirm the sidebar sections render: `Token Usage`, `Subagents`, and `Session Analysis`. `Go Usage`/`Copilot Usage` appear only when enabled in `~/.opencode-insights/config.jsonc` and the session uses the matching provider.
-
-5. Confirm the prompt-right metrics row appears in the prompt footer.
-
-Restore the published package by removing the local path from `cli.json` and adding `"@rejacky/opencode-insights"` back.
+If V2 refuses the local folder, the fallback is a local plugin file: create
+`~/.config/opencode/plugins/opencode-insights-dev.ts` containing
+`export { default } from "/absolute/path/to/opencode-insights/dist/tui.js";`
+and remove the local entry from `opencode.jsonc`.
 
 ## Layout
 
