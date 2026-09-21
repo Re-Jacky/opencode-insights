@@ -37,7 +37,7 @@ The plugin only runs inside OpenCode V2. To try a local build:
 
 2. Restart OpenCode.
 
-3. Open a session and confirm the sidebar sections render: `Token Usage`, `Subagents`, and `Session Analysis`. `Go Usage`/`Copilot Usage` appear only when enabled in `~/.opencode-insights/config.jsonc` and the session uses the matching provider. Confirm the prompt-right metrics row appears in the prompt footer.
+3. Open a session and confirm the sidebar sections render above the native `Context` and `MCP` sections: `Token Usage`, `Session Analysis`, `Subagents`. `Go Usage`/`Copilot Usage` appear only when enabled in `~/.opencode-insights/config.jsonc` and the session uses the matching provider. Confirm the prompt metrics line appears directly above the composer.
 
 4. When you are done, restore the published package:
 

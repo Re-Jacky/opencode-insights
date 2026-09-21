@@ -11,8 +11,8 @@ describe("V2 TUI plugin shell", () => {
 
   test("subscribes to V2 events and registers both slots", () => {
     expect(source()).toContain("context.data.listen(");
-    expect(source()).toContain('append: "sidebar.content"');
-    expect(source()).toContain('after: "prompt.footer.status"');
+    expect(source()).toContain('prepend: "sidebar.content"');
+    expect(source()).toContain('append: "session.composer.top"');
   });
 
   test("does not use the removed V1 plugin API", () => {

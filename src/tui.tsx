@@ -90,7 +90,6 @@ function TokenUsageSection(props: { sessionID: string; state: InsightState; vers
 
 function PromptRight(props: {
   sessionID: string;
-  mode: string;
   status: "idle" | "running";
   state: InsightState;
   version: number;
@@ -99,7 +98,7 @@ function PromptRight(props: {
   const theme = usePlugin().theme;
   const text = createMemo(() => {
     props.version;
-    if (!isSessionID(props.sessionID) || props.mode === "shell") return "";
+    if (!isSessionID(props.sessionID)) return "";
     return renderPromptRightMetricsText(props.state.metrics, props.sessionID, {
       idle: props.status === "idle",
       metrics: props.config.promptRightMetrics
@@ -405,7 +404,7 @@ async function setup(context: Context) {
   };
 
   const unregisterSidebar = context.ui.slot({
-    append: "sidebar.content",
+    prepend: "sidebar.content",
     render: (input) => (
       <box flexDirection="column">
         <SessionAnalysisSection
@@ -440,12 +439,11 @@ async function setup(context: Context) {
   });
 
   const unregisterPrompt = context.ui.slot({
-    after: "prompt.footer.status",
+    append: "session.composer.top",
     render: (input) => (
       <PromptRight
-        sessionID={input.sessionID ?? ""}
-        mode={input.mode}
-        status={input.sessionID ? context.data.session.status(input.sessionID) : "idle"}
+        sessionID={input.sessionID}
+        status={context.data.session.status(input.sessionID)}
         state={state}
         version={metricsRev() + now()}
         config={config}
