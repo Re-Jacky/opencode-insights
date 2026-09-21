@@ -207,10 +207,13 @@ function applyMessage(state: HydrationState, sessionID: string, message: Record<
  */
 const MAX_MESSAGE_PAGES = 100;
 
+/** The host rejects a larger `limit` with `InvalidRequestError` ("less than or equal to 200"). */
+export const MESSAGE_PAGE_SIZE = 200;
+
 export async function listAllMessages(
   fetchPage: (input: MessagePageInput) => Promise<MessagePage>,
   sessionID: string,
-  pageSize = 500
+  pageSize = MESSAGE_PAGE_SIZE
 ): Promise<Array<Record<string, unknown>>> {
   const messages: Array<Record<string, unknown>> = [];
   const seen = new Set<string>();

@@ -135,6 +135,18 @@ describe("hydrateInsights", () => {
     expect(messages.map((message) => message.id)).toEqual(["m1", "m2", "m3"]);
   });
 
+  test("requests pages within the host's maximum page size", async () => {
+    const requests: Array<Record<string, unknown>> = [];
+    await listAllMessages(async (input) => {
+      requests.push(input);
+      return { data: [], cursor: { next: null } };
+    }, "ses_root");
+
+    // The host rejects limit > 200 with InvalidRequestError, which aborted
+    // hydration entirely and left the Token Usage section empty.
+    expect(requests[0]).toMatchObject({ limit: 200 });
+  });
+
   test("does not create a subagent row for a session without a parent", async () => {
     const s = state();
     const data: ActivityData = {
