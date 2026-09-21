@@ -1,17 +1,27 @@
-import { recordChild, recordCompaction, recordStep, recordToolPart, type ActivityState } from "./activity.js";
+import { recordChild, recordCompaction, recordToolPart, type ActivityState } from "./activity.js";
 
-export type ActivityClient = {
+export type ActivityData = {
   session: {
-    list(input: { limit?: number }): Promise<{ data?: Array<{ id: string; parentID?: string; title?: string }> }>;
-    messages(input: { sessionID: string }): Promise<{ data?: Array<{ parts?: Array<Record<string, unknown>> }> }>;
+    list(): Array<{ id: string; parentID?: string; title?: string }>;
+    message: {
+      sync(sessionID: string): Promise<void>;
+      list(sessionID: string): Array<Record<string, unknown>>;
+    };
   };
 };
 
 const CONCURRENCY_LIMIT = 4;
-const LIST_LIMIT = 1000;
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === "object" && !Array.isArray(value);
+}
 
 function isSessionID(value: string): boolean {
   return value.startsWith("ses");
+}
+
+function stringFrom(value: unknown): string | undefined {
+  return typeof value === "string" && value.length > 0 ? value : undefined;
 }
 
 async function mapConcurrent<T, R>(items: T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
@@ -38,60 +48,64 @@ function collectUnhydrated(state: ActivityState, rootSessionID: string): string[
     if (sessionID === undefined || visited.has(sessionID)) continue;
     visited.add(sessionID);
     if (!state.hydrated.has(sessionID) && !state.loading.has(sessionID)) result.push(sessionID);
-    const children = state.childrenByParent[sessionID] ?? [];
-    for (const child of children) {
+    for (const child of state.childrenByParent[sessionID] ?? []) {
       if (!visited.has(child)) stack.push(child);
     }
   }
   return result;
 }
 
-function applyParts(state: ActivityState, sessionID: string, parts: Array<Record<string, unknown>>): void {
-  for (const part of parts) {
-    const id = typeof part.id === "string" ? part.id : undefined;
-    const type = part.type;
-    if (type === "tool" && typeof part.tool === "string") {
+function applyContent(state: ActivityState, sessionID: string, content: Array<Record<string, unknown>>): void {
+  for (const item of content) {
+    const id = stringFrom(item.id);
+    if (item.type === "tool" && typeof item.name === "string") {
+      const toolState = isRecord(item.state) ? item.state : undefined;
+      const status = stringFrom(toolState?.status);
+      const error = isRecord(toolState?.error) ? stringFrom(toolState.error.message) : undefined;
+      const input = isRecord(toolState?.input) ? toolState.input : undefined;
       recordToolPart(state, sessionID, {
         ...(id !== undefined ? { id } : {}),
-        tool: part.tool,
-        ...(typeof part.state === "object" && part.state !== null && !Array.isArray(part.state)
-          ? { state: part.state as { status?: string; input?: { name?: string }; error?: string } }
+        tool: item.name,
+        ...(toolState
+          ? {
+              state: {
+                ...(status !== undefined ? { status } : {}),
+                ...(input !== undefined ? { input: input as { name?: string } } : {}),
+                ...(error !== undefined ? { error } : {})
+              }
+            }
           : {})
       });
-    } else if (type === "compaction" && id !== undefined) {
-      recordCompaction(state, sessionID, id, part.auto === true);
-    } else if (type === "step-finish" && id !== undefined) {
-      recordStep(state, sessionID, id);
+    } else if (item.type === "compaction" && id !== undefined) {
+      recordCompaction(state, sessionID, id, item.reason === "auto");
     }
   }
 }
 
-export async function hydrateActivity(client: ActivityClient, state: ActivityState, rootSessionID: string): Promise<void> {
+export async function hydrateActivity(data: ActivityData, state: ActivityState, rootSessionID: string): Promise<void> {
   if (!isSessionID(rootSessionID)) return;
+
   let sessions: Array<{ id: string; parentID?: string; title?: string }> = [];
   try {
-    const response = await client.session.list({ limit: LIST_LIMIT });
-    sessions = response.data ?? [];
+    sessions = data.session.list();
   } catch {
     return; // degrade to live-only data
   }
   for (const session of sessions) {
-    if (session.id) {
-      if (session.title) state.titles[session.id] = session.title;
-      if (session.parentID) recordChild(state, session.id, session.parentID);
-    }
+    if (!session.id) continue;
+    if (session.title) state.titles[session.id] = session.title;
+    if (session.parentID) recordChild(state, session.id, session.parentID);
   }
 
   const toHydrate = collectUnhydrated(state, rootSessionID);
   for (const sessionID of toHydrate) state.loading.add(sessionID);
   await mapConcurrent(toHydrate, CONCURRENCY_LIMIT, async (sessionID) => {
     try {
-      const response = await client.session.messages({ sessionID });
-      const messages = response.data ?? [];
+      await data.session.message.sync(sessionID);
+      const messages = data.session.message.list(sessionID);
       for (const message of messages) {
-        if (message.parts && message.parts.length > 0) {
-          applyParts(state, sessionID, message.parts);
-        }
+        const content = Array.isArray(message.content) ? message.content.filter(isRecord) : [];
+        if (content.length > 0) applyContent(state, sessionID, content);
       }
       state.hydrated.add(sessionID);
     } catch {

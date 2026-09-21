@@ -54,7 +54,7 @@ import {
   type ActivityState,
   type SessionAnalysisRow
 } from "./activity.js";
-import { hydrateActivity, type ActivityClient } from "./activity-hydrate.js";
+import { hydrateActivity } from "./activity-hydrate.js";
 import { useTerminalDimensions } from "@opentui/solid";
 
 function isSessionID(value: string | undefined): value is string {
@@ -804,7 +804,7 @@ const tui: TuiPlugin = async (api, options) => {
             sessionID={props.session_id}
             state={activity}
             subscribe={activityListeners.subscribe}
-            hydrate={() => void hydrateActivity(api.client as unknown as ActivityClient, activity, props.session_id).then(() => activityListeners.notify())}
+            hydrate={() => void hydrateActivity(api.client as never, activity, props.session_id).then(() => activityListeners.notify())}
           />
           <TokenUsageSidebar
             api={api}

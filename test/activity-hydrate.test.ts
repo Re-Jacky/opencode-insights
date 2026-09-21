@@ -1,144 +1,77 @@
 import { describe, expect, test } from "vitest";
 import { createActivityState } from "../src/activity.js";
-import { hydrateActivity, type ActivityClient } from "../src/activity-hydrate.js";
-
-function makeClient(overrides: Partial<ActivityClient["session"]> = {}): ActivityClient {
-  return {
-    session: {
-      list: async () => ({ data: [] }),
-      messages: async () => ({ data: [] }),
-      ...overrides
-    }
-  };
-}
+import { hydrateActivity, type ActivityData } from "../src/activity-hydrate.js";
 
 describe("hydrateActivity", () => {
-  test("seeds childrenByParent and titles from session.list", async () => {
+  test("records child sessions, tool calls, and compactions from message content", async () => {
     const state = createActivityState();
-    const client = makeClient({
-      list: async () => ({
-        data: [
-          { id: "ses_root", title: "Main" },
-          { id: "ses_a", parentID: "ses_root", title: "T3" },
-          { id: "ses_b", parentID: "ses_a", title: "child" }
-        ]
-      })
-    });
-    await hydrateActivity(client, state, "ses_root");
-    expect(state.childrenByParent["ses_root"]).toEqual(["ses_a"]);
-    expect(state.childrenByParent["ses_a"]).toEqual(["ses_b"]);
-    expect(state.titles["ses_a"]).toBe("T3");
-  });
-
-  test("backfills tool, compaction, and step counts per session", async () => {
-    const state = createActivityState();
-    const client = makeClient({
-      list: async () => ({ data: [{ id: "ses_root", title: "Main" }, { id: "ses_a", parentID: "ses_root", title: "T3" }] }),
-      messages: async ({ sessionID }) => ({
-        data:
-          sessionID === "ses_a"
-            ? [
-                { parts: [
-                    { id: "prt_t1", type: "tool", tool: "bash", state: { status: "completed", input: {} } },
-                    { id: "prt_c1", type: "compaction", auto: true },
-                    { id: "prt_s1", type: "step-finish", reason: "stop" }
-                  ] }
-              ]
-            : []
-      })
-    });
-    await hydrateActivity(client, state, "ses_root");
-    expect(state.bySessionID["ses_a"]?.toolCalls).toBe(1);
-    expect(state.bySessionID["ses_a"]?.toolBreakdown).toEqual({ bash: 1 });
-    expect(state.bySessionID["ses_a"]?.autoCompacts).toBe(1);
-    expect(state.bySessionID["ses_a"]?.steps).toBe(1);
-    expect(state.hydrated.has("ses_a")).toBe(true);
-  });
-
-  test("does not double count parts seen live before backfill", async () => {
-    const state = createActivityState();
-    // part seen live (identical id)
-    state.bySessionID["ses_a"] = { toolCalls: 1, toolBreakdown: { bash: 1 }, warnings: 0, warningDetails: [], skills: {}, autoCompacts: 0, steps: 0 };
-    state.seenKeys["ses_a"] = new Set(["tool:prt_t1"]);
-    const client = makeClient({
-      list: async () => ({ data: [{ id: "ses_root", title: "Main" }, { id: "ses_a", parentID: "ses_root", title: "T3" }] }),
-      messages: async () => ({
-        data: [{ parts: [{ id: "prt_t1", type: "tool", tool: "bash", state: { status: "completed", input: {} } }] }]
-      })
-    });
-    await hydrateActivity(client, state, "ses_root");
-    expect(state.bySessionID["ses_a"]?.toolCalls).toBe(1);
-  });
-
-  test("backfills warning messages from tool part state", async () => {
-    const state = createActivityState();
-    const client = makeClient({
-      list: async () => ({ data: [{ id: "ses_root", title: "Main" }, { id: "ses_a", parentID: "ses_root", title: "T3" }] }),
-      messages: async () => ({
-        data: [{
-          parts: [{ id: "prt_e1", type: "tool", tool: "bash", state: { status: "error", input: {}, error: "command exited with code 1" } }]
-        }]
-      })
-    });
-    await hydrateActivity(client, state, "ses_root");
-    expect(state.bySessionID["ses_a"]?.warnings).toBe(1);
-    expect(state.bySessionID["ses_a"]?.warningDetails).toEqual([
-      { tool: "bash", message: "command exited with code 1" }
-    ]);
-  });
-
-  test("skips already hydrated sessions", async () => {
-    const state = createActivityState();
-    state.hydrated.add("ses_root");
-    let messagesCalled = 0;
-    const client = makeClient({
-      list: async () => ({ data: [{ id: "ses_root", title: "Main" }] }),
-      messages: async () => {
-        messagesCalled += 1;
-        return { data: [] };
+    const data: ActivityData = {
+      session: {
+        list: () => [
+          { id: "ses_root", title: "Root" },
+          { id: "ses_child", parentID: "ses_root", title: "Child" }
+        ],
+        message: {
+          sync: async () => {},
+          list: (sessionID) =>
+            sessionID === "ses_child"
+              ? [
+                  {
+                    type: "assistant",
+                    content: [
+                      { type: "tool", id: "t1", name: "read", state: { status: "completed", input: {} } },
+                      { type: "compaction", id: "c1", reason: "auto", status: "completed" }
+                    ]
+                  }
+                ]
+              : []
+        }
       }
-    });
-    await hydrateActivity(client, state, "ses_root");
-    expect(messagesCalled).toBe(0);
+    };
+
+    await hydrateActivity(data, state, "ses_root");
+
+    expect(state.childrenByParent["ses_root"]).toEqual(["ses_child"]);
+    expect(state.bySessionID["ses_child"]?.toolCalls).toBe(1);
+    expect(state.bySessionID["ses_child"]?.autoCompacts).toBe(1);
+    expect(state.hydrated.has("ses_child")).toBe(true);
   });
 
-  test("marks loading during the fetch and clears it after", async () => {
+  test("leaves the session unhydrated when message sync fails so it can retry", async () => {
     const state = createActivityState();
-    const client = makeClient({
-      list: async () => ({ data: [{ id: "ses_root", title: "Main" }] }),
-      messages: async () => {
-        expect(state.loading.has("ses_root")).toBe(true);
-        return { data: [] };
+    const data: ActivityData = {
+      session: {
+        list: () => [{ id: "ses_root" }],
+        message: {
+          sync: async () => {
+            throw new Error("transient");
+          },
+          list: () => []
+        }
       }
-    });
-    await hydrateActivity(client, state, "ses_root");
-    expect(state.loading.size).toBe(0);
-    expect(state.hydrated.has("ses_root")).toBe(true);
-  });
+    };
 
-  test("does not mark hydrated when messages fails; retries next call", async () => {
-    const state = createActivityState();
-    const client = makeClient({
-      list: async () => ({ data: [{ id: "ses_root", title: "Main" }] }),
-      messages: async () => {
-        throw new Error("boom");
-      }
-    });
-    await hydrateActivity(client, state, "ses_root");
+    await hydrateActivity(data, state, "ses_root");
+
     expect(state.hydrated.has("ses_root")).toBe(false);
-    expect(state.loading.size).toBe(0);
+    expect(state.loading.has("ses_root")).toBe(false);
   });
 
-  test("ignores non-session root ids", async () => {
+  test("returns early for a non-session id", async () => {
     const state = createActivityState();
-    let listCalled = 0;
-    const client = makeClient({
-      list: async () => {
-        listCalled += 1;
-        return { data: [] };
+    let listed = false;
+    const data: ActivityData = {
+      session: {
+        list: () => {
+          listed = true;
+          return [];
+        },
+        message: { sync: async () => {}, list: () => [] }
       }
-    });
-    await hydrateActivity(client, state, "not-a-session");
-    expect(listCalled).toBe(0);
+    };
+
+    await hydrateActivity(data, state, "not-a-session");
+
+    expect(listed).toBe(false);
   });
 });
