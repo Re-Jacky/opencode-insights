@@ -16,11 +16,6 @@
   "main": "./dist/tui.js",
   "types": "./dist/tui.d.ts",
   "exports": {
-    ".": {
-      "types": "./dist/tui.d.ts",
-      "import": "./dist/tui.js",
-      "default": "./dist/tui.js"
-    },
     "./tui": {
       "types": "./dist/tui.d.ts",
       "import": "./dist/tui.js",
