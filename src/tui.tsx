@@ -16,7 +16,7 @@ import {
   visibleAnalysisRowCount,
   type SessionAnalysisRow
 } from "./activity.js";
-import { selectDialogSize } from "./dialog-size.js";
+import { selectAnalysisDialogLayout, selectDialogSize } from "./dialog-size.js";
 import { createSubagentState, getSubagentSidebarModel, sumSubagentTokens } from "./subagents.js";
 import {
   createGoUsageRefresher,
@@ -198,16 +198,19 @@ function SessionAnalysisDialog(props: {
     }
     return result;
   });
+  // Explicit heights: an unbounded scrollbox stretches to the bottom of the host's
+  // full-screen dialog overlay, so short content used to fill the whole terminal.
+  const layout = createMemo(() => selectAnalysisDialogLayout(visible().length, context.renderer.height));
 
   return (
-    <box flexDirection="column" flexGrow={1} paddingLeft={4} paddingRight={4} paddingTop={1}>
+    <box flexDirection="column" height={layout().height} paddingLeft={4} paddingRight={4} paddingTop={1}>
       <box flexDirection="row" justifyContent="space-between">
         <text attributes={bold}>{"Session Analysis"}</text>
         <text fg={theme.text.muted} onMouseUp={() => context.ui.dialog.clear()}>
           {"esc"}
         </text>
       </box>
-      <scrollbox flexGrow={1} paddingTop={1}>
+      <scrollbox height={layout().scrollHeight} paddingTop={1}>
         <For each={visible()}>
           {(row) => (
             <text
