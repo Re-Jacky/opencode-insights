@@ -1,15 +1,36 @@
 # opencode-insights
 
-Live OpenCode TUI sidebars for token/TPS metrics, session analysis, subagent status, and provider usage. V2-only.
+Live OpenCode TUI sidebars for token/TPS metrics, session analysis, subagent status, and provider usage.
+
+## Compatibility
+
+| opencode-insights   | OpenCode            | Status                                                                 |
+| ------------------- | ------------------- | ---------------------------------------------------------------------- |
+| **1.0.0 and above** | **V2 (`2.0.0+`)**   | Built for OpenCode V2 as a TUI-only plugin. Actively maintained.        |
+| `0.4.x` and below   | V1                  | Legacy server plugin. Frozen: no V2 support, no longer maintained.      |
+
+**`1.0.0` is the first V2-only release, and every release from `1.0.0` on targets OpenCode V2.**
+It is built against `@opencode/plugin` v2 and loads through OpenCode's V2 CLI plugin API, so it
+does not run on V1.
+
+- OpenCode **V2** required (`opencode` 2.0.0 or newer; developed against 2.0.11).
+- Node.js **>= 22.13** to build from source. OpenCode supplies the runtime.
+- Peers, bundled with OpenCode: `@opentui/core` >= 0.5.10, `@opentui/solid` >= 0.5.10, `solid-js` >= 1.9.0.
 
 ## Install
 
-This is a TUI-only plugin, so OpenCode loads it from the CLI config
-(`~/.config/opencode/cli.json`) — the same place `opencode plugin add` writes a
-package that exposes a TUI entrypoint but no server entrypoint. Install with:
+`opencode-insights` is a **TUI-only** plugin: the published package exposes one TUI
+entrypoint (`./tui`) and no server entrypoint. Install it with:
 
 ```bash
 opencode plugin add @rejacky/opencode-insights
+```
+
+OpenCode inspects the package, finds the TUI entrypoint, and adds it to the CLI
+config, printing:
+
+```text
+TUI plugin "@rejacky/opencode-insights" installed and added to ~/.config/opencode/cli.json
 ```
 
 Or add it manually:
@@ -21,19 +42,31 @@ Or add it manually:
 }
 ```
 
-Then restart OpenCode.
+Pin an exact version with `"@rejacky/opencode-insights@1.0.0"`.
 
-> Do not add it to `opencode.json(c)` `plugins`: OpenCode V2 drops a plugin
-> directory or package from there unless it exposes a `server` entrypoint, and
-> this plugin is TUI-only.
+Then restart OpenCode (or reopen the TUI) to load the plugin.
+
+### Why `cli.json` and not `opencode.json(c)`
+
+OpenCode V2 has two plugin lists, and this plugin belongs to the second one:
+
+- `opencode.json(c)` → `plugins` — packages that expose a **server** entrypoint. Their TUI components are loaded automatically by the CLI.
+- `cli.json` → `plugins` — CLI/TUI-only plugins. They run locally in the terminal and stay active even when the CLI is connected to a remote server.
+
+`opencode-insights` has no server entrypoint, so `opencode plugin add` writes it to
+`cli.json`. A package with no server entrypoint that is added to `opencode.json(c)`
+is not loaded.
 
 ## Update
 
 ```bash
-rm -rf ~/.cache/opencode/packages/node_modules/@rejacky/opencode-insights
+opencode plugin check    # list configured plugin packages that are outdated
+opencode plugin update   # update them
 ```
 
-Then reinstall by restarting OpenCode, or bump the version in `cli.json` if you pin one.
+If a version still looks stale, remove the entry from `cli.json`, restart OpenCode,
+and add it again. For local development builds, install a directory path instead —
+see [DEVELOPMENT.md](./DEVELOPMENT.md).
 
 ## What You Get
 
@@ -79,6 +112,9 @@ A legacy `~/.opencode-insights/config.json` is honored when `config.jsonc` does 
 
 To get the cookie, log in to `https://opencode.ai`, open the workspace `/go` page, then copy the `auth` cookie value from your browser's DevTools (Application → Cookies → `https://opencode.ai`). The cookie lasts up to a year; if the section shows an error, copy it again.
 
+The section reads the usage widget from that workspace's `/go` console page, so it
+only shows data for a workspace with an active Go subscription.
+
 ### Copilot Usage
 
 ```jsonc
@@ -97,11 +133,23 @@ Premium   84%  ████████░░  7d
           2942 / 3500
 ```
 
-## Breaking Change: V2-only
+## Deprecations
 
-This plugin now targets OpenCode V2 (`@opencode/plugin@2.x`) as a TUI-only plugin. The previous V1 server plugin, local capture database, web viewer, and `opencode-insights` CLI have been removed.
+### Capture, viewer, and CLI removed in 1.0.0
 
-If you need those V1 features, stay on the `0.4.x` line. Upgrading to `1.x` requires OpenCode V2.
+**The capture feature is deprecated and removed in `1.0.0`.** The V2-only release
+drops the whole V1 stack:
+
+- ❌ the local capture store (SQLite capture database) — no capture, no database;
+- ❌ the `opencode-insights` command-line interface;
+- ❌ the web viewer UI;
+- ❌ the V1 server plugin entrypoint (the package is TUI-only now).
+
+The plugin is stateless: it reads OpenCode's in-process V2 data API and renders TUI
+sidebars. `retentionDays` and `dbPath` in `~/.opencode-insights/config.jsonc` are
+V1-only keys and are ignored if present.
+
+If you need the capture stack, stay on the `0.4.x` line with OpenCode V1.
 
 ## Privacy
 
