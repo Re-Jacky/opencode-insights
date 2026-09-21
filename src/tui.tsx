@@ -456,7 +456,10 @@ async function setup(context: Context) {
   const unregisterSidebar = context.ui.slot({
     prepend: "sidebar.content",
     render: (input) => (
-      <box flexDirection="column">
+      // The host spaces the `sidebar.content` contributions with `gap: 1`, but
+      // this slot returns a single wrapper box, so the sections inside it need
+      // that same gap here to sit as far apart as the native Context/MCP ones.
+      <box flexDirection="column" gap={1}>
         <SessionAnalysisSection
           sessionID={input.sessionID}
           state={state}

@@ -22,6 +22,12 @@ describe("V2 TUI plugin shell", () => {
     expect(text).not.toContain("api.theme.current");
   });
 
+  test("spaces the prepended sidebar sections like the native ones", () => {
+    // The host applies gap 1 between sidebar.content contributions; the single
+    // wrapper box this slot returns has to reproduce that between its sections.
+    expect(source()).toContain("gap={1}");
+  });
+
   test("renders prompt-right metrics and token usage", () => {
     expect(source()).toContain("PromptRight");
     expect(source()).toContain("renderPromptRightMetricsText");
