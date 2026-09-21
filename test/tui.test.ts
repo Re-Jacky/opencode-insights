@@ -12,7 +12,7 @@ describe("V2 TUI plugin shell", () => {
   test("subscribes to V2 events and registers both slots", () => {
     expect(source()).toContain("context.data.listen(");
     expect(source()).toContain('append: "sidebar.content"');
-    expect(source()).toContain('append: "prompt.footer.status"');
+    expect(source()).toContain('after: "prompt.footer.status"');
   });
 
   test("does not use the removed V1 plugin API", () => {
@@ -34,7 +34,8 @@ describe("V2 TUI plugin shell", () => {
     expect(text).toContain("SessionAnalysisDialog");
     expect(text).toContain("buildSessionAnalysisRows");
     expect(text).toContain("context.ui.dialog.show(");
-    expect(text).toContain('context.ui.dialog.set({ size: "large" })');
+    expect(text).toContain("selectDialogSize(");
+    expect(text).toContain("visibleAnalysisRowCount(");
   });
 
   test("renders subagents with router navigation and hover", () => {

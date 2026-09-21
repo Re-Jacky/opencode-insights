@@ -13,8 +13,10 @@ import {
   treeActivity,
   treeLoading,
   treeSubagentCount,
+  visibleAnalysisRowCount,
   type SessionAnalysisRow
 } from "./activity.js";
+import { selectDialogSize } from "./dialog-size.js";
 import { createSubagentState, getSubagentSidebarModel, sumSubagentTokens } from "./subagents.js";
 import {
   createGoUsageRefresher,
@@ -45,11 +47,19 @@ function Section(props: {
   onToggle: () => void;
   children: JSX.Element;
 }) {
+  const theme = usePlugin().theme;
+  const [hovered, setHovered] = createSignal(false);
   return (
     <box flexDirection="column">
-      <text attributes={bold} onMouseDown={props.onToggle}>
-        {`${props.collapsed ? "▶" : "▼"} ${props.title}`}
-      </text>
+      <box
+        flexDirection="row"
+        {...(hovered() ? { backgroundColor: theme.background.raised.base } : {})}
+        onMouseMove={() => setHovered(true)}
+        onMouseOut={() => setHovered(false)}
+        onMouseUp={props.onToggle}
+      >
+        <text attributes={bold}>{`${props.collapsed ? "▶" : "▼"} ${props.title}`}</text>
+      </box>
       <Show when={!props.collapsed}>{props.children}</Show>
     </box>
   );
@@ -112,6 +122,7 @@ function SessionAnalysisSection(props: {
   const context = usePlugin();
   const theme = context.theme;
   const [collapsedGroups, setCollapsedGroups] = createSignal<Set<string>>(new Set());
+  const [hovered, setHovered] = createSignal(false);
 
   createEffect(() => {
     props.sessionID;
@@ -136,7 +147,8 @@ function SessionAnalysisSection(props: {
   };
 
   const openDialog = () => {
-    context.ui.dialog.set({ size: "large" });
+    const rows = buildSessionAnalysisRows(props.state.activity, props.sessionID);
+    context.ui.dialog.set({ size: selectDialogSize(visibleAnalysisRowCount(rows, collapsedGroups())) });
     context.ui.dialog.show(() => (
       <SessionAnalysisDialog
         sessionID={props.sessionID}
@@ -149,10 +161,14 @@ function SessionAnalysisSection(props: {
 
   return (
     <Show when={lines().length > 0}>
-      <box flexDirection="column">
-        <text attributes={bold} onMouseUp={openDialog}>
-          {"Session Analysis"}
-        </text>
+      <box
+        flexDirection="column"
+        {...(hovered() ? { backgroundColor: theme.background.raised.base } : {})}
+        onMouseMove={() => setHovered(true)}
+        onMouseOut={() => setHovered(false)}
+        onMouseUp={openDialog}
+      >
+        <text attributes={bold}>{"Session Analysis"}</text>
         <For each={lines()}>{(line) => <text fg={theme.text.muted}>{line}</text>}</For>
       </box>
     </Show>
@@ -220,41 +236,40 @@ function SubagentsSection(props: { sessionID: string; state: InsightState; versi
   return (
     <Show when={model()}>
       {(value) => (
-        <box flexDirection="column">
-          <text attributes={bold} onMouseDown={() => setCollapsed((current) => !current)}>
-            {`${collapsed() ? "▶" : "▼"} ${value().title}`}
-          </text>
-          <Show when={!collapsed()}>
-            <text fg={theme.text.muted}>{value().summary}</text>
-            <For each={value().rows}>
-              {(row) => (
-                <box
-                  flexDirection="row"
-                  {...(hovered() === row.id ? { backgroundColor: theme.background.raised.base } : {})}
-                  onMouseMove={() => setHovered(row.id)}
-                  onMouseOut={() => setHovered(undefined)}
-                  onMouseUp={() => context.ui.router.navigate({ type: "session", sessionID: row.id })}
+        <Section
+          title={value().title}
+          collapsed={collapsed()}
+          onToggle={() => setCollapsed((current) => !current)}
+        >
+          <text fg={theme.text.muted}>{value().summary}</text>
+          <For each={value().rows}>
+            {(row) => (
+              <box
+                flexDirection="row"
+                {...(hovered() === row.id ? { backgroundColor: theme.background.raised.base } : {})}
+                onMouseMove={() => setHovered(row.id)}
+                onMouseOut={() => setHovered(undefined)}
+                onMouseUp={() => context.ui.router.navigate({ type: "session", sessionID: row.id })}
+              >
+                <text
+                  fg={
+                    row.status === "running"
+                      ? theme.text.feedback.success.base
+                      : row.status === "error"
+                        ? theme.text.feedback.error.base
+                        : theme.text.muted
+                  }
                 >
-                  <text
-                    fg={
-                      row.status === "running"
-                        ? theme.text.feedback.success.base
-                        : row.status === "error"
-                          ? theme.text.feedback.error.base
-                          : theme.text.muted
-                    }
-                  >
-                    {"• "}
-                  </text>
-                  <box flexDirection="column">
-                    <text fg={theme.text.base}>{row.title}</text>
-                    <text fg={theme.text.muted}>{row.subtitle}</text>
-                  </box>
+                  {"• "}
+                </text>
+                <box flexDirection="column">
+                  <text fg={theme.text.base}>{row.title}</text>
+                  <text fg={theme.text.muted}>{row.subtitle}</text>
                 </box>
-              )}
-            </For>
-          </Show>
-        </box>
+              </box>
+            )}
+          </For>
+        </Section>
       )}
     </Show>
   );
@@ -425,7 +440,7 @@ async function setup(context: Context) {
   });
 
   const unregisterPrompt = context.ui.slot({
-    append: "prompt.footer.status",
+    after: "prompt.footer.status",
     render: (input) => (
       <PromptRight
         sessionID={input.sessionID ?? ""}

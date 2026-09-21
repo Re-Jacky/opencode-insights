@@ -15,7 +15,8 @@ import {
   recordToolPart,
   treeActivity,
   treeLoading,
-  treeSubagentCount
+  treeSubagentCount,
+  visibleAnalysisRowCount
 } from "../src/activity.js";
 
 describe("activity state", () => {
@@ -309,5 +310,29 @@ describe("activity formatting", () => {
     expect(formatSubagentCount(0)).toBe("");
     expect(formatSubagentCount(1)).toBe("1 subagent");
     expect(formatSubagentCount(2)).toBe("2 subagents");
+  });
+});
+
+describe("visibleAnalysisRowCount", () => {
+  const rows = [
+    { text: "Group A", header: true, key: "a" },
+    { text: "  · a1", header: false },
+    { text: "  · a2", header: false },
+    { text: "Group B", header: true, key: "b" },
+    { text: "  · b1", header: false }
+  ];
+
+  test("counts every row when nothing is collapsed", () => {
+    expect(visibleAnalysisRowCount(rows, new Set())).toBe(5);
+  });
+
+  test("keeps a collapsed header but drops its rows", () => {
+    expect(visibleAnalysisRowCount(rows, new Set(["Group A"]))).toBe(3);
+    expect(visibleAnalysisRowCount(rows, new Set(["Group A", "Group B"]))).toBe(2);
+  });
+
+  test("ignores collapsed keys that match no header and empty input", () => {
+    expect(visibleAnalysisRowCount(rows, new Set(["missing"]))).toBe(5);
+    expect(visibleAnalysisRowCount([], new Set(["Group A"]))).toBe(0);
   });
 });

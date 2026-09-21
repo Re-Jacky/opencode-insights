@@ -288,3 +288,24 @@ export function buildSessionAnalysisRows(state: ActivityState, rootSessionID: st
     ...body.map((text) => ({ text, header: false }))
   ]);
 }
+
+/**
+ * Number of analysis rows the dialog will show once `collapsed` headers hide
+ * their bodies. Collapsed headers themselves stay visible, matching the dialog.
+ */
+export function visibleAnalysisRowCount(
+  rows: readonly SessionAnalysisRow[],
+  collapsed: ReadonlySet<string>
+): number {
+  let header: string | undefined;
+  let count = 0;
+  for (const row of rows) {
+    if (row.header) {
+      header = row.text;
+      count += 1;
+    } else if (header === undefined || !collapsed.has(header)) {
+      count += 1;
+    }
+  }
+  return count;
+}
