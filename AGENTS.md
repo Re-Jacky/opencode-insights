@@ -26,7 +26,7 @@ OpenCode V2 TUI plugin `@rejacky/opencode-insights` — reactive sidebar section
 - `src/events.ts` — pure V2 event bridge: maps `OpenCodeEvent`s onto metrics/activity/subagents/provider state and reports which domains changed. Unit-tested with V2-shaped fixtures.
 - `src/config.ts` — `~/.opencode-insights/config.jsonc` parsing (`promptRightMetrics`, `goUsage`, `copilotUsage`) and `resolveCopilotToken`.
 - `src/metrics.ts` — TPS/cache metrics, `promptRightMetrics`, and session token usage rendering.
-- `src/activity.ts` — session activity metrics (tool calls, skills, auto-compactions, steps) with per-metric keyed dedup; `src/activity-hydrate.ts` — history backfill via `context.data.session.list()` / `message.sync()` / `message.list()`.
+- `src/activity.ts` — session activity metrics (tool calls, skills, auto-compactions, steps) with per-metric keyed dedup; `src/activity-hydrate.ts` — history backfill via `context.data.session.list()` and the client's paged `message.list()` (`listAllMessages`). The host's `message.sync()` window is only the newest 20 messages, so session totals page the full history and fall back to that window only when paging is unavailable.
 - `src/subagents.ts` — subagent tracking from V2 session events (`session.created`/`renamed`/`status`/`idle`/`execution.failed`/`usage.updated`); `src/go-usage.ts` — opt-in Go usage; `src/copilot-usage.ts` — GitHub Copilot premium-interaction quota.
 
 ## Operational rules

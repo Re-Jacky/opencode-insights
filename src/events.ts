@@ -146,7 +146,8 @@ export function applyInsightEvent(state: InsightState, event: unknown): InsightE
         };
       }
       const finish = str(data.finish);
-      if (finish === "tool-calls") break;
+      // In V2 a tool-call step is its own assistant message, so its usage must be
+      // recorded here too; skipping it silently dropped most of a session's tokens.
       const usage: Partial<StepUsage> = state.stepUsageByMessage[messageID] ?? {};
       recordAssistantMessage(state.metrics, {
         sessionID,

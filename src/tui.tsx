@@ -5,7 +5,7 @@ import type { Context } from "@opencode/plugin/tui/context";
 import { createEffect, createMemo, createSignal, For, Show, type JSX } from "solid-js";
 import { readInsightsConfig, resolveCopilotToken, type InsightsConfig } from "./config.js";
 import { createMetricsState, renderPromptRightMetricsText, renderSessionTokenUsage } from "./metrics.js";
-import { hydrateInsights, needsHydration } from "./activity-hydrate.js";
+import { hydrateInsights, listAllMessages, needsHydration, type ActivityData } from "./activity-hydrate.js";
 import {
   buildSessionAnalysisRows,
   createActivityState,
@@ -396,7 +396,19 @@ async function setup(context: Context) {
 
   const hydrate = (sessionID: string) => {
     if (!isSessionID(sessionID) || !needsHydration(activity, sessionID)) return;
-    void hydrateInsights(context.data, state, sessionID)
+    // The host's `session.message.sync()` only loads the newest transcript page
+    // (20 messages), so session totals read through the client's paging API instead.
+    const data: ActivityData = {
+      session: {
+        list: () => context.data.session.list(),
+        message: {
+          sync: (id) => context.data.session.message.sync(id),
+          list: (id) => context.data.session.message.list(id),
+          history: (id) => listAllMessages((input) => context.client.message.list(input), id)
+        }
+      }
+    };
+    void hydrateInsights(data, state, sessionID)
       .then(() => {
         setActivityRev((value) => value + 1);
         setMetricsRev((value) => value + 1);

@@ -172,6 +172,28 @@ describe("applyInsightEvent", () => {
     expect(usage?.usage.inputTokens).toBe(8);
   });
 
+  test("records usage for tool-call steps, which are their own assistant messages", () => {
+    const { state: s } = state();
+    applyInsightEvent(s, {
+      type: "session.step.started",
+      created: 1,
+      data: { sessionID: "ses_a", assistantMessageID: "msg_tool", started: 1 }
+    });
+    applyInsightEvent(s, {
+      type: "session.step.ended",
+      created: 10,
+      data: {
+        sessionID: "ses_a",
+        assistantMessageID: "msg_tool",
+        finish: "tool-calls",
+        tokens: { input: 100, output: 20, reasoning: 5, cache: { read: 900, write: 0 } }
+      }
+    });
+
+    expect(s.metrics.responseUsageByMessageID["msg_tool"]?.usage.outputTokens).toBe(20);
+    expect(s.metrics.sessionTokenUsageByID["ses_a"]?.responseCount).toBe(1);
+  });
+
   test("records tools and compactions as activity", () => {
     const { state: s, activity } = state();
     applyInsightEvent(s, {

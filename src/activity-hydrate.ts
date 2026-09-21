@@ -11,12 +11,30 @@ export type ActivitySession = {
   model?: { providerID?: string };
 };
 
+export type MessagePageInput = {
+  sessionID: string;
+  limit: number;
+  order?: "asc" | "desc" | undefined;
+  cursor?: string | undefined;
+};
+
+export type MessagePage = {
+  data: Array<Record<string, unknown>>;
+  cursor?: { previous?: string | null; next?: string | null } | undefined;
+};
+
 export type ActivityData = {
   session: {
     list(): ActivitySession[];
     message: {
       sync(sessionID: string): Promise<void>;
       list(sessionID: string): Array<Record<string, unknown>>;
+      /**
+       * Full session history through the client. The host's `message.sync()`
+       * loads one newest-first page (20 messages by default), which is the
+       * transcript window rather than the whole session.
+       */
+      history?(sessionID: string): Promise<Array<Record<string, unknown>>>;
     };
   };
 };
@@ -183,6 +201,49 @@ function applyMessage(state: HydrationState, sessionID: string, message: Record<
 }
 
 /**
+ * Histories are walked oldest-first a page at a time. The cap only guards against
+ * a cursor that never terminates; ids repeat across page boundaries, so entries
+ * already seen are dropped rather than applied twice.
+ */
+const MAX_MESSAGE_PAGES = 100;
+
+export async function listAllMessages(
+  fetchPage: (input: MessagePageInput) => Promise<MessagePage>,
+  sessionID: string,
+  pageSize = 500
+): Promise<Array<Record<string, unknown>>> {
+  const messages: Array<Record<string, unknown>> = [];
+  const seen = new Set<string>();
+  let cursor: string | undefined;
+
+  for (let page = 0; page < MAX_MESSAGE_PAGES; page += 1) {
+    const input: MessagePageInput =
+      cursor === undefined ? { sessionID, limit: pageSize, order: "asc" } : { sessionID, limit: pageSize, cursor };
+    const response = await fetchPage(input);
+    const data = Array.isArray(response?.data) ? response.data : [];
+    for (const message of data) {
+      const id = isRecord(message) ? stringFrom(message.id) : undefined;
+      if (id !== undefined) {
+        if (seen.has(id)) continue;
+        seen.add(id);
+      }
+      messages.push(message);
+    }
+    const next = response?.cursor?.next;
+    if (typeof next !== "string" || next.length === 0) break;
+    cursor = next;
+  }
+
+  return messages;
+}
+
+/** The host's newest-first transcript window, used when history paging is unavailable. */
+async function loadWindowedMessages(data: ActivityData, sessionID: string): Promise<Array<Record<string, unknown>>> {
+  await data.session.message.sync(sessionID);
+  return data.session.message.list(sessionID);
+}
+
+/**
  * Backfills activity, token metrics, subagents, and provider tracking for a session
  * tree from the V2 `Data` API. Per-session failures leave the session unhydrated so a
  * later call retries it.
@@ -210,8 +271,10 @@ export async function hydrateInsights(data: ActivityData, state: HydrationState,
   for (const sessionID of toHydrate) state.activity.loading.add(sessionID);
   await mapConcurrent(toHydrate, CONCURRENCY_LIMIT, async (sessionID) => {
     try {
-      await data.session.message.sync(sessionID);
-      const messages = data.session.message.list(sessionID);
+      const history = data.session.message.history;
+      // Session totals must cover every response, so page the full history when the
+      // host exposes it and only fall back to the newest-first transcript window.
+      const messages = history ? await history(sessionID) : await loadWindowedMessages(data, sessionID);
       for (const message of messages) applyMessage(state, sessionID, message);
       state.activity.hydrated.add(sessionID);
     } catch {

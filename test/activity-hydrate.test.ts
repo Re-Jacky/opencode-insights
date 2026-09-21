@@ -1,7 +1,13 @@
 import { describe, expect, test } from "vitest";
 import { createActivityState } from "../src/activity.js";
 import { createCopilotProviderTracker } from "../src/copilot-usage.js";
-import { hydrateInsights, needsHydration, type ActivityData, type HydrationState } from "../src/activity-hydrate.js";
+import {
+  hydrateInsights,
+  listAllMessages,
+  needsHydration,
+  type ActivityData,
+  type HydrationState
+} from "../src/activity-hydrate.js";
 import { createGoProviderTracker } from "../src/go-usage.js";
 import { createMetricsState } from "../src/metrics.js";
 import { createSubagentState } from "../src/subagents.js";
@@ -84,6 +90,49 @@ describe("hydrateInsights", () => {
     // 50 tokens over the persisted 4s streamed window (1000 -> 5000), matching
     // the native message header rather than the shorter completed-created span.
     expect(s.metrics.messageMetricsByID["msg_1"]).toMatchObject({ totalTokens: 50, durationMs: 4_000 });
+  });
+
+  test("hydrates the whole session, not the host's newest-20 message window", async () => {
+    const s = state();
+    const all = Array.from({ length: 25 }, (_, index) => ({
+      type: "assistant",
+      id: `msg_${index}`,
+      time: { created: 1_000 + index, completed: 1_100 + index },
+      tokens: { input: 1, output: 10, reasoning: 1, cache: { read: 0, write: 0 } },
+      content: []
+    }));
+    const data: ActivityData = {
+      session: {
+        list: () => [{ id: "ses_root" }],
+        message: {
+          // The host's message.sync() only loads the newest 20 messages.
+          sync: async () => {},
+          list: () => all.slice(-20),
+          history: async () => all
+        }
+      }
+    };
+
+    await hydrateInsights(data, s, "ses_root");
+
+    expect(s.metrics.sessionTokenUsageByID["ses_root"]?.responseCount).toBe(25);
+    expect(s.metrics.sessionTokenUsageByID["ses_root"]?.outputTokens).toBe(250);
+  });
+
+  test("pages the full message history with cursors and dedupes ids", async () => {
+    const pages = [
+      { data: [{ id: "m1" }, { id: "m2" }], cursor: { next: "cursor_2" } },
+      { data: [{ id: "m2" }, { id: "m3" }], cursor: { next: null } }
+    ];
+    const requests: Array<Record<string, unknown>> = [];
+    const messages = await listAllMessages(async (input) => {
+      requests.push(input);
+      return pages[requests.length - 1]!;
+    }, "ses_root", 2);
+
+    expect(requests[0]).toEqual({ sessionID: "ses_root", limit: 2, order: "asc" });
+    expect(requests[1]).toEqual({ sessionID: "ses_root", limit: 2, cursor: "cursor_2" });
+    expect(messages.map((message) => message.id)).toEqual(["m1", "m2", "m3"]);
   });
 
   test("does not create a subagent row for a session without a parent", async () => {
