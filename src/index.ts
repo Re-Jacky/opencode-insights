@@ -73,9 +73,8 @@ export const OpenCodeInsights: Plugin = async (_input, options?: OpenCodeInsight
 };
 
 export const server = OpenCodeInsights;
-const rootTui: TuiPlugin = async (...args) => {
-  const mod = await import("./tui.js");
-  return mod.tui(...args);
+const rootTui: TuiPlugin = async () => {
+  await import("./tui.js");
 };
 export const id = "opencode-insights";
 export { rootTui as tui };

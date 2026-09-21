@@ -69,14 +69,15 @@
   },
   "peerDependencies": {
     "@opencode-ai/plugin": ">=1.15.0 <2",
-    "@opentui/core": ">=0.4.0 <0.6",
-    "@opentui/solid": ">=0.4.0 <0.6",
+    "@opentui/core": ">=0.5.10 <0.6",
+    "@opentui/solid": ">=0.5.10 <0.6",
     "solid-js": "^1.9.12"
   },
   "devDependencies": {
     "@opencode-ai/plugin": "^1.17.13",
-    "@opentui/core": "^0.5.1",
-    "@opentui/solid": "^0.5.1",
+    "@opencode/theme": "^2.0.11",
+    "@opentui/core": "^0.5.10",
+    "@opentui/solid": "^0.5.10",
     "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^24.12.2",
     "@types/sql.js": "^1.4.11",
@@ -86,6 +87,7 @@
     "vitest": "^4.1.10"
   },
   "dependencies": {
+    "@opencode/plugin": "^2.0.11",
     "better-sqlite3": "^12.11.1",
     "jsonc-parser": "^3.3.1",
     "sql.js": "^1.14.1"

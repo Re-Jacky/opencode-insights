@@ -1,27 +1,30 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, test } from "vitest";
-import { createListenerRegistry } from "../src/listeners.js";
-import { hasRenderStateChanged } from "../src/render-state.js";
 
-describe("TUI listener registry", () => {
-  test("notifies only listeners registered with the matching registry", () => {
-    const metrics = createListenerRegistry();
-    const subagents = createListenerRegistry();
-    let metricUpdates = 0;
-    let subagentUpdates = 0;
+const source = () => readFileSync(new URL("../src/tui.tsx", import.meta.url), "utf8");
 
-    metrics.subscribe(() => metricUpdates++);
-    subagents.subscribe(() => subagentUpdates++);
-
-    metrics.notify();
-
-    expect(metricUpdates).toBe(1);
-    expect(subagentUpdates).toBe(0);
+describe("V2 TUI plugin shell", () => {
+  test("defines the plugin with the stable id", () => {
+    expect(source()).toContain("Plugin.define({");
+    expect(source()).toContain('id: "opencode-insights"');
   });
 
-  test("detects only visual sidebar state changes", () => {
-    const state = { content: "Subagents", visible: true, height: "auto" as const };
+  test("subscribes to V2 events and registers both slots", () => {
+    expect(source()).toContain("context.data.listen(");
+    expect(source()).toContain('append: "sidebar.content"');
+    expect(source()).toContain('append: "prompt.footer.status"');
+  });
 
-    expect(hasRenderStateChanged(state, { ...state })).toBe(false);
-    expect(hasRenderStateChanged(state, { ...state, content: "Subagents\n1 running" })).toBe(true);
+  test("does not use the removed V1 plugin API", () => {
+    const text = source();
+    expect(text).not.toContain("@opencode-ai/plugin");
+    expect(text).not.toContain("api.event.on");
+    expect(text).not.toContain("api.theme.current");
+  });
+
+  test("renders prompt-right metrics and token usage", () => {
+    expect(source()).toContain("PromptRight");
+    expect(source()).toContain("renderPromptRightMetricsText");
+    expect(source()).toContain("renderSessionTokenUsage");
   });
 });

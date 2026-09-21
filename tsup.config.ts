@@ -13,6 +13,9 @@ export default defineConfig({
   external: [
     "@opencode-ai/plugin",
     "@opencode-ai/plugin/tui",
+    "@opencode/plugin",
+    "@opencode/plugin/tui",
+    "@opencode/theme",
     "@opentui/core",
     "@opentui/solid",
     "solid-js"
