@@ -26,6 +26,7 @@ describe("V2 TUI plugin shell", () => {
     expect(source()).toContain("PromptRight");
     expect(source()).toContain("renderPromptRightMetricsText");
     expect(source()).toContain("renderSessionTokenUsage");
+    expect(source()).toContain('justifyContent="flex-end"');
   });
 
   test("renders the session analysis sidebar and dialog", () => {

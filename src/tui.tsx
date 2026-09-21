@@ -107,7 +107,9 @@ function PromptRight(props: {
 
   return (
     <Show when={text().length > 0}>
-      <text fg={theme.text.muted}>{text()}</text>
+      <box flexDirection="row" justifyContent="flex-end" width="100%">
+        <text fg={theme.text.muted}>{text()}</text>
+      </box>
     </Show>
   );
 }
