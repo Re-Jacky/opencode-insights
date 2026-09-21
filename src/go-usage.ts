@@ -106,6 +106,8 @@ export function createGoProviderTracker() {
   };
 }
 
+export type GoProviderTracker = ReturnType<typeof createGoProviderTracker>;
+
 export type GoUsageState = {
   data?: GoUsage | undefined;
   error?: string | undefined;

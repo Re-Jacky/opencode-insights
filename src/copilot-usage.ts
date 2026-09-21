@@ -106,6 +106,8 @@ export function createCopilotProviderTracker() {
   };
 }
 
+export type CopilotProviderTracker = ReturnType<typeof createCopilotProviderTracker>;
+
 export function createCopilotUsageRefresher(
   config: CopilotUsageConfig,
   token: string,
