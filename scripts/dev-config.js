@@ -10,9 +10,8 @@ function detectEol(source) {
   return source.includes("\r\n") ? "\r\n" : "\n";
 }
 
-function isInsightsEntry(entry, localPath, aliases) {
+function isInsightsEntry(entry, localPath) {
   if (entry === localPath || entry === INSIGHTS_PACKAGE) return true;
-  if (aliases.includes(entry)) return true;
   return entry.startsWith(`${INSIGHTS_PACKAGE}@`) || entry.startsWith(`${INSIGHTS_PACKAGE}/`);
 }
 
@@ -40,16 +39,16 @@ function transform(source, plugins, previous) {
   };
 }
 
-export function addLocalPlugin(source, localPath, aliases = []) {
+export function addLocalPlugin(source, localPath) {
   const previous = readPluginSpecs(source);
-  const plugins = previous.filter((entry) => !isInsightsEntry(entry, localPath, aliases));
+  const plugins = previous.filter((entry) => !isInsightsEntry(entry, localPath));
   if (!plugins.includes(localPath)) plugins.push(localPath);
   return transform(source, plugins, previous);
 }
 
-export function revertLocalPlugin(source, localPath, officialSpec, aliases = []) {
+export function revertLocalPlugin(source, localPath, officialSpec) {
   const previous = readPluginSpecs(source);
-  const plugins = previous.filter((entry) => !isInsightsEntry(entry, localPath, aliases));
+  const plugins = previous.filter((entry) => !isInsightsEntry(entry, localPath));
   if (!plugins.includes(officialSpec)) plugins.push(officialSpec);
   return transform(source, plugins, previous);
 }

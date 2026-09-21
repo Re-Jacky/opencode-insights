@@ -4,15 +4,28 @@ Live OpenCode TUI sidebars for token/TPS metrics, session analysis, subagent sta
 
 ## Install
 
-Add the plugin to OpenCode's plugin list in `~/.config/opencode/opencode.jsonc`:
+This is a TUI-only plugin, so OpenCode loads it from the CLI config
+(`~/.config/opencode/cli.json`) — the same place `opencode plugin add` writes a
+package that exposes a TUI entrypoint but no server entrypoint. Install with:
+
+```bash
+opencode plugin add @rejacky/opencode-insights
+```
+
+Or add it manually:
 
 ```jsonc
+// ~/.config/opencode/cli.json
 {
   "plugins": ["@rejacky/opencode-insights"]
 }
 ```
 
 Then restart OpenCode.
+
+> Do not add it to `opencode.json(c)` `plugins`: OpenCode V2 drops a plugin
+> directory or package from there unless it exposes a `server` entrypoint, and
+> this plugin is TUI-only.
 
 ## Update
 

@@ -5,10 +5,9 @@ export type PluginTransformResult = {
 };
 
 export function readPluginSpecs(source: string): string[];
-export function addLocalPlugin(source: string, localPath: string, aliases?: string[]): PluginTransformResult;
+export function addLocalPlugin(source: string, localPath: string): PluginTransformResult;
 export function revertLocalPlugin(
   source: string,
   localPath: string,
-  officialSpec: string,
-  aliases?: string[]
+  officialSpec: string
 ): PluginTransformResult;

@@ -23,16 +23,17 @@ The plugin only runs inside OpenCode V2. To try a local build:
    ```
 
    This builds, then adds this repository's `dev/` plugin directory to `plugins`
-   in `~/.config/opencode/opencode.jsonc` (backing the file up to
-   `opencode.jsonc.bak` and preserving comments). Preview without writing with
+   in `~/.config/opencode/cli.json` (backing the file up to `cli.json.bak` and
+   preserving formatting). Preview without writing with
    `npm run debug -- --dry-run`. Point it at another config with
-   `npm run debug -- --config /path/to/opencode.jsonc`.
+   `npm run debug -- --config /path/to/cli.json`.
 
-   Why `dev/` and not the repo root: OpenCode V2 registers a plugin directory
-   only when it exposes a `server` (or `index`) entrypoint, and loads the TUI
-   component from its `tui` entrypoint. A directory without a server entrypoint
-   is dropped silently. `dev/index.ts` is a no-op server stub and `dev/tui.ts`
-   re-exports `dist/tui.js`, so the folder satisfies both.
+   Why `cli.json` and `dev/`: this is a TUI-only plugin, and OpenCode V2 loads
+   TUI-only plugins from the CLI config (`opencode plugin add` routes a package
+   with a `tui` entrypoint but no server entrypoint here). A plugin directory in
+   `opencode.json(c)` `plugins` is dropped unless it exposes a `server`/`index`
+   entrypoint. `dev/tui.ts` re-exports `dist/tui.js`, so `dev/` mirrors the
+   published package's layout.
 
 2. Restart OpenCode.
 
@@ -44,13 +45,12 @@ The plugin only runs inside OpenCode V2. To try a local build:
    npm run revert-debug
    ```
 
-   This removes the local path (and any stale repo-root entry) and adds
-   `@rejacky/opencode-insights@latest`.
+   This removes the local path and adds `@rejacky/opencode-insights@latest`.
 
 ## Layout
 
 - `src/tui.tsx` — the plugin entrypoint and all Solid components.
-- `dev/` — dev-only plugin directory for `npm run debug` (`index.ts` server stub, `tui.ts` TUI re-export). Not published.
+- `dev/` — dev-only plugin directory for `npm run debug`; `tui.ts` re-exports `dist/tui.js`. Not published.
 - `src/events.ts` — pure V2 event → state bridge (unit-tested).
 - `src/config.ts` — `config.jsonc` parsing.
 - `src/metrics.ts`, `src/activity.ts`, `src/subagents.ts`, `src/go-usage.ts`, `src/copilot-usage.ts` — pure logic.
