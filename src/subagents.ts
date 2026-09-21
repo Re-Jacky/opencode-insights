@@ -39,17 +39,6 @@ export type SubagentSidebarModel = {
   rows: SubagentSidebarRow[];
 };
 
-type EventLike = {
-  type?: unknown;
-  properties?: {
-    info?: Record<string, unknown>;
-    part?: unknown;
-    sessionID?: unknown;
-    sessionId?: unknown;
-    status?: unknown;
-  };
-};
-
 export function createSubagentState(activityStore?: ActivityState): SubagentState {
   return { children: {}, totalExecuted: 0, ...(activityStore ? { activityStore } : {}) };
 }
@@ -72,36 +61,93 @@ export function recordSubagentFromSessionInfo(
   state.totalExecuted += 1;
 }
 
-export function applySubagentEvent(state: SubagentState, event: unknown) {
-  const created = extractTaskToolSubagent(event) ?? extractSubagent(event) ?? updateExistingSubagent(state, event);
-  if (!created) return false;
-
-  const previous = state.children[created.id];
-  const preserveTerminal = !!previous && isTerminalStatus(previous.status) && created.status === "running";
-  const status = preserveTerminal ? previous.status : created.status;
-  const title = preserveTerminal ? previous.title : created.title;
-  const startedAt = preserveTerminal ? previous.startedAt : created.startedAt;
-  const endedAt = preserveTerminal ? previous.endedAt : created.endedAt;
-  const next: SubagentInfo = {
-    ...previous,
-    ...created,
-    title,
-    status,
-    startedAt,
-    updatedAt: created.updatedAt,
-    endedAt,
-    elapsedMs: elapsedMs(startedAt, endedAt ?? created.updatedAt),
-    tokens: created.tokens ?? previous?.tokens,
-    activity: state.activityStore ? (state.activityStore.bySessionID[created.id] ??= emptyActivity()) : undefined
+function eventData(event: unknown): { type: string; created: number; data: Record<string, unknown> } | undefined {
+  if (!isRecord(event)) return undefined;
+  const type = asString(event.type);
+  if (!type) return undefined;
+  return {
+    type,
+    created: asNumber(event.created) ?? Date.now(),
+    data: isRecord(event.data) ? event.data : {}
   };
-
-  if (!previous) state.totalExecuted += 1;
-  state.children[created.id] = next;
-  return true;
 }
 
-function isTerminalStatus(status: SubagentStatus) {
-  return status === "done" || status === "error";
+export function applySubagentEvent(state: SubagentState, event: unknown): boolean {
+  const parsed = eventData(event);
+  if (!parsed) return false;
+  const { type, created, data } = parsed;
+  const sessionID = asString(data.sessionID);
+
+  if (type === "session.created") {
+    const parentID = asString(data.parentID);
+    if (!sessionID || !parentID || sessionID === parentID) return false;
+    if (state.children[sessionID]) return false;
+    const startedAt = new Date(created).toISOString();
+    state.children[sessionID] = {
+      id: sessionID,
+      parentID,
+      title: asString(data.title) ?? asString(data.agent) ?? "subagent",
+      status: "running",
+      startedAt,
+      updatedAt: startedAt,
+      activity: state.activityStore ? (state.activityStore.bySessionID[sessionID] ??= emptyActivity()) : undefined
+    };
+    state.totalExecuted += 1;
+    return true;
+  }
+
+  if (!sessionID) return false;
+  const previous = state.children[sessionID];
+  if (!previous) return false;
+
+  if (type === "session.renamed") {
+    const title = asString(data.title);
+    if (!title || title === previous.title) return false;
+    state.children[sessionID] = { ...previous, title, updatedAt: new Date(created).toISOString() };
+    return true;
+  }
+
+  if (type === "session.status") {
+    const statusType = isRecord(data.status) ? asString(data.status.type) : undefined;
+    const next = statusType === "busy" || statusType === "retry" ? "running" : "done";
+    return setStatus(state, previous, next, created);
+  }
+
+  if (type === "session.idle") {
+    return setStatus(state, previous, "done", created);
+  }
+
+  if (type === "session.execution.failed") {
+    return setStatus(state, previous, "error", created);
+  }
+
+  if (type === "session.usage.updated" || type === "session.step.ended") {
+    const tokens = extractTokens(data.tokens) ?? previous.tokens;
+    const updatedAt = new Date(created).toISOString();
+    state.children[sessionID] = {
+      ...previous,
+      updatedAt,
+      tokens,
+      elapsedMs: elapsedMs(previous.startedAt, previous.endedAt ?? updatedAt)
+    };
+    return true;
+  }
+
+  return false;
+}
+
+function setStatus(state: SubagentState, previous: SubagentInfo, status: SubagentStatus, created: number): boolean {
+  if (previous.status === status) return false;
+  const timestamp = new Date(created).toISOString();
+  const terminal = status === "done" || status === "error";
+  state.children[previous.id] = {
+    ...previous,
+    status,
+    updatedAt: timestamp,
+    endedAt: terminal ? previous.endedAt ?? timestamp : previous.endedAt,
+    elapsedMs: elapsedMs(previous.startedAt, terminal ? previous.endedAt ?? timestamp : timestamp)
+  };
+  return true;
 }
 
 export function renderSubagentStatus(state: SubagentState, options: { now?: number } = {}) {
@@ -211,140 +257,6 @@ export function renderSubagentFooter(state: SubagentState, parentID: string, opt
   return `Subagents ${model.summary}`;
 }
 
-function extractTaskToolSubagent(event: unknown): SubagentInfo | undefined {
-  if (!isRecord(event)) return undefined;
-  const evt = event as EventLike;
-  if (evt.type !== "message.part.updated") return undefined;
-
-  const part = isRecord(evt.properties?.part) ? evt.properties.part : undefined;
-  if (!part || part.type !== "tool" || part.tool !== "task") return undefined;
-
-  const state = isRecord(part.state) ? part.state : undefined;
-  if (!state) return undefined;
-
-  const metadata = isRecord(state.metadata) ? state.metadata : isRecord(part.metadata) ? part.metadata : undefined;
-  const id = asString(metadata?.sessionId) ?? sessionIdFromTaskOutput(asString(state.output));
-  const parentID = asString(metadata?.parentSessionId) ?? asString(evt.properties?.sessionID);
-  if (!id || !parentID || id === parentID) return undefined;
-
-  const status = taskToolStatus(state);
-  const startedMs = numberFromPath(state.time, "start") ?? numberFromPath(state.time, "created") ?? Date.now();
-  const endedMs = numberFromPath(state.time, "end");
-  const updatedMs = endedMs ?? numberFromPath(state.time, "updated") ?? startedMs;
-  const input = isRecord(state.input) ? state.input : undefined;
-  const agent = asString(input?.subagent_type);
-  const taskTitle = asString(state.title) ?? asString(input?.description) ?? "task";
-
-  return {
-    id,
-    parentID,
-    title: agent ? `${agentTitle(agent)}: ${taskTitle}` : taskTitle,
-    status,
-    startedAt: new Date(startedMs).toISOString(),
-    updatedAt: new Date(updatedMs).toISOString(),
-    endedAt: status === "running" || typeof endedMs !== "number" ? undefined : new Date(endedMs).toISOString(),
-    elapsedMs: Math.max(0, updatedMs - startedMs),
-    tokens: extractTokens(state.tokens)
-  };
-}
-
-function taskToolStatus(state: Record<string, unknown>): SubagentStatus {
-  const status = asString(state.status);
-  if (status === "completed") return "done";
-  if (status === "error") return "error";
-  return "running";
-}
-
-function sessionIdFromTaskOutput(output: string | undefined) {
-  return output?.match(/<task\s+id="([^"]+)"/)?.[1];
-}
-
-function agentTitle(agent: string) {
-  return agent
-    .split(/[-_\s]+/)
-    .filter(Boolean)
-    .map((part) => `${part.slice(0, 1).toUpperCase()}${part.slice(1)}`)
-    .join(" ");
-}
-
-function extractSubagent(event: unknown): SubagentInfo | undefined {
-  if (!isRecord(event)) return undefined;
-  const evt = event as EventLike;
-  if (evt.type !== "session.created" && evt.type !== "session.updated") return undefined;
-
-  const info = isRecord(evt.properties?.info) ? evt.properties.info : undefined;
-  if (!info) return undefined;
-
-  const parentID = asString(info.parentID);
-  const id = asString(info.id);
-  if (!parentID || !id || id === parentID) return undefined;
-
-  const startedMs = numberFromPath(info.time, "created") ?? numberFromPath(info.time, "started") ?? Date.now();
-  const completedMs = numberFromPath(info.time, "completed");
-  const explicitUpdatedMs = numberFromPath(info.time, "updated");
-  const updatedMs = completedMs ?? explicitUpdatedMs ?? startedMs;
-  const hasError = info.error !== undefined || asString(info.status) === "error";
-  const status: SubagentStatus =
-    hasError
-      ? "error"
-      : typeof completedMs === "number"
-        ? "done"
-        : "running";
-  const terminalMs =
-    typeof completedMs === "number"
-      ? updatedMs
-      : status === "error" && typeof explicitUpdatedMs === "number"
-        ? explicitUpdatedMs
-        : undefined;
-  const endedAt = typeof terminalMs === "number" ? new Date(terminalMs).toISOString() : undefined;
-
-  return {
-    id,
-    parentID,
-    title: asString(info.title) ?? asString(info.name) ?? "subagent",
-    status,
-    startedAt: new Date(startedMs).toISOString(),
-    updatedAt: new Date(updatedMs).toISOString(),
-    endedAt,
-    elapsedMs: Math.max(0, updatedMs - startedMs),
-    tokens: extractTokens(info.tokens)
-  };
-}
-
-function updateExistingSubagent(state: SubagentState, event: unknown): SubagentInfo | undefined {
-  if (!isRecord(event)) return undefined;
-  const evt = event as EventLike;
-  const sessionID = asString(evt.properties?.sessionID) ?? asString(evt.properties?.sessionId);
-  if (!sessionID) return undefined;
-
-  const previous = state.children[sessionID];
-  if (!previous) return undefined;
-
-  const info = isRecord(evt.properties?.info) ? evt.properties.info : undefined;
-  const status = statusFromEvent(event) ?? previous.status;
-  const timestamp = new Date().toISOString();
-  const done = status === "done" || status === "error";
-  return {
-    ...previous,
-    status,
-    updatedAt: timestamp,
-    endedAt: done ? previous.endedAt ?? timestamp : previous.endedAt,
-    tokens: extractTokens(info?.tokens) ?? previous.tokens
-  };
-}
-
-function statusFromEvent(event: unknown): SubagentStatus | undefined {
-  if (!isRecord(event)) return undefined;
-  const evt = event as EventLike;
-  if (evt.type === "session.error") return "error";
-  if (evt.type === "session.status" && isRecord(evt.properties?.status)) {
-    const statusType = asString(evt.properties.status.type);
-    if (statusType === "busy" || statusType === "running") return "running";
-    if (statusType === "error") return "error";
-  }
-  return undefined;
-}
-
 function extractTokens(value: unknown): SubagentInfo["tokens"] {
   if (!isRecord(value)) return undefined;
   const input = asNumber(value.input);
@@ -433,11 +345,6 @@ function elapsedMs(start: string, end: string) {
   const endMs = Date.parse(end);
   if (!Number.isFinite(startMs) || !Number.isFinite(endMs)) return 0;
   return Math.max(0, endMs - startMs);
-}
-
-function numberFromPath(value: unknown, key: string) {
-  if (!isRecord(value)) return undefined;
-  return asNumber(value[key]);
 }
 
 function asNumber(value: unknown): number | undefined {
