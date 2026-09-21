@@ -148,8 +148,6 @@ function SessionAnalysisSection(props: {
   };
 
   const openDialog = () => {
-    const rows = buildSessionAnalysisRows(props.state.activity, props.sessionID);
-    context.ui.dialog.set({ size: selectDialogSize(visibleAnalysisRowCount(rows, collapsedGroups())) });
     context.ui.dialog.show(() => (
       <SessionAnalysisDialog
         sessionID={props.sessionID}
@@ -201,6 +199,11 @@ function SessionAnalysisDialog(props: {
   // Explicit heights: an unbounded scrollbox stretches to the bottom of the host's
   // full-screen dialog overlay, so short content used to fill the whole terminal.
   const layout = createMemo(() => selectAnalysisDialogLayout(visible().length, context.renderer.height));
+  // The width preset has to be applied from inside the dialog: dialog.show() resets
+  // the presentation options to "medium", so setting it beforehand is discarded.
+  createEffect(() => {
+    context.ui.dialog.set({ size: selectDialogSize(visibleAnalysisRowCount(rows(), props.collapsedGroups)) });
+  });
 
   return (
     <box flexDirection="column" height={layout().height} paddingLeft={4} paddingRight={4} paddingTop={1}>

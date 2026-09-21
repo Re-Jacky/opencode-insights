@@ -37,6 +37,11 @@ describe("V2 TUI plugin shell", () => {
     expect(text).toContain("context.ui.dialog.show(");
     expect(text).toContain("selectDialogSize(");
     expect(text).toContain("visibleAnalysisRowCount(");
+    // dialog.show() resets the presentation options, so the size only sticks when
+    // it is applied from inside the dialog component, after show().
+    expect(text.indexOf("context.ui.dialog.set({ size: selectDialogSize(")).toBeGreaterThan(
+      text.indexOf("context.ui.dialog.show(")
+    );
   });
 
   test("renders subagents with router navigation and hover", () => {
