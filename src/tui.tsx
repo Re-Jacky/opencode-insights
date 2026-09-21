@@ -2,11 +2,19 @@
 import { createTextAttributes } from "@opentui/core";
 import { Plugin, usePlugin } from "@opencode/plugin/tui";
 import type { Context } from "@opencode/plugin/tui/context";
-import { createMemo, createSignal, For, Show, type JSX } from "solid-js";
+import { createMemo, createSignal, For, onMount, Show, type JSX } from "solid-js";
 import { readInsightsConfig, type InsightsConfig } from "./config.js";
 import { createMetricsState, renderPromptRightMetricsText, renderSessionTokenUsage } from "./metrics.js";
 import { hydrateActivity } from "./activity-hydrate.js";
-import { createActivityState } from "./activity.js";
+import {
+  buildSessionAnalysisRows,
+  createActivityState,
+  formatActivityBriefRows,
+  treeActivity,
+  treeLoading,
+  treeSubagentCount,
+  type SessionAnalysisRow
+} from "./activity.js";
 import { createSubagentState, sumSubagentTokens } from "./subagents.js";
 import { createGoProviderTracker } from "./go-usage.js";
 import { createCopilotProviderTracker } from "./copilot-usage.js";
@@ -82,6 +90,107 @@ function PromptRight(props: {
   );
 }
 
+function SessionAnalysisSection(props: {
+  sessionID: string;
+  state: InsightState;
+  version: number;
+  onHydrate: () => void;
+}) {
+  const context = usePlugin();
+  const theme = context.theme;
+  const [collapsedGroups, setCollapsedGroups] = createSignal<Set<string>>(new Set());
+
+  onMount(props.onHydrate);
+
+  const lines = createMemo(() => {
+    props.version;
+    const tree = treeActivity(props.state.activity, props.sessionID);
+    const loading = treeLoading(props.state.activity, props.sessionID);
+    const rows = formatActivityBriefRows(tree, treeSubagentCount(props.state.activity, props.sessionID));
+    return loading && rows.length === 0 ? ["loading…"] : rows;
+  });
+
+  const toggleGroup = (key: string) => {
+    setCollapsedGroups((previous) => {
+      const next = new Set(previous);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  };
+
+  const openDialog = () => {
+    context.ui.dialog.set({ size: "large" });
+    context.ui.dialog.show(() => (
+      <SessionAnalysisDialog
+        sessionID={props.sessionID}
+        state={props.state}
+        collapsedGroups={collapsedGroups()}
+        onToggleGroup={toggleGroup}
+      />
+    ));
+  };
+
+  return (
+    <Show when={lines().length > 0}>
+      <box flexDirection="column">
+        <text attributes={bold} onMouseUp={openDialog}>
+          {"Session Analysis"}
+        </text>
+        <For each={lines()}>{(line) => <text fg={theme.text.muted}>{line}</text>}</For>
+      </box>
+    </Show>
+  );
+}
+
+function SessionAnalysisDialog(props: {
+  sessionID: string;
+  state: InsightState;
+  collapsedGroups: Set<string>;
+  onToggleGroup: (key: string) => void;
+}) {
+  const context = usePlugin();
+  const theme = context.theme;
+  const rows = createMemo(() => buildSessionAnalysisRows(props.state.activity, props.sessionID));
+  const visible = createMemo<SessionAnalysisRow[]>(() => {
+    const result: SessionAnalysisRow[] = [];
+    let header: string | undefined;
+    for (const row of rows()) {
+      if (row.header) {
+        header = row.text;
+        result.push({ text: `${props.collapsedGroups.has(row.text) ? "▶" : "▾"} ${row.text}`, header: true, key: row.text });
+      } else if (header === undefined || !props.collapsedGroups.has(header)) {
+        result.push(row);
+      }
+    }
+    return result;
+  });
+
+  return (
+    <box flexDirection="column" flexGrow={1} paddingLeft={4} paddingRight={4} paddingTop={1}>
+      <box flexDirection="row" justifyContent="space-between">
+        <text attributes={bold}>{"Session Analysis"}</text>
+        <text fg={theme.text.muted} onMouseUp={() => context.ui.dialog.clear()}>
+          {"esc"}
+        </text>
+      </box>
+      <scrollbox flexGrow={1} paddingTop={1}>
+        <For each={visible()}>
+          {(row) => (
+            <text
+              fg={row.header ? theme.text.base : theme.text.muted}
+              {...(row.header ? { attributes: bold } : {})}
+              {...(row.header && row.key ? { onMouseUp: () => props.onToggleGroup(row.key ?? "") } : {})}
+            >
+              {row.text}
+            </text>
+          )}
+        </For>
+      </scrollbox>
+    </box>
+  );
+}
+
 async function setup(context: Context) {
   const config = await readInsightsConfig({ dataDir: context.options.dataDir });
   const activity = createActivityState();
@@ -124,6 +233,12 @@ async function setup(context: Context) {
     append: "sidebar.content",
     render: (input) => (
       <box flexDirection="column">
+        <SessionAnalysisSection
+          sessionID={input.sessionID}
+          state={state}
+          version={activityRev() + now()}
+          onHydrate={() => hydrate(input.sessionID)}
+        />
         <TokenUsageSection
           sessionID={input.sessionID}
           state={state}

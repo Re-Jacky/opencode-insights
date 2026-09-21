@@ -27,4 +27,13 @@ describe("V2 TUI plugin shell", () => {
     expect(source()).toContain("renderPromptRightMetricsText");
     expect(source()).toContain("renderSessionTokenUsage");
   });
+
+  test("renders the session analysis sidebar and dialog", () => {
+    const text = source();
+    expect(text).toContain("SessionAnalysisSection");
+    expect(text).toContain("SessionAnalysisDialog");
+    expect(text).toContain("buildSessionAnalysisRows");
+    expect(text).toContain("context.ui.dialog.show(");
+    expect(text).toContain('context.ui.dialog.set({ size: "large" })');
+  });
 });
