@@ -1,25 +1,12 @@
 import { defineConfig } from "tsup";
 
 export default defineConfig({
-  entry: {
-    index: "src/index.ts",
-    tui: "src/tui.tsx",
-    cli: "src/cli.ts"
-  },
+  entry: { tui: "src/tui.tsx" },
   format: ["esm"],
   dts: true,
   clean: true,
   sourcemap: false,
-  external: [
-    "@opencode-ai/plugin",
-    "@opencode-ai/plugin/tui",
-    "@opencode/plugin",
-    "@opencode/plugin/tui",
-    "@opencode/theme",
-    "@opentui/core",
-    "@opentui/solid",
-    "solid-js"
-  ],
+  external: ["@opencode/plugin", "@opencode/plugin/tui", "@opentui/core", "@opentui/solid", "solid-js"],
   esbuildOptions(options) {
     options.jsx = "automatic";
     options.jsxImportSource = "@opentui/solid";

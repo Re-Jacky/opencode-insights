@@ -2,7 +2,7 @@
   "$schema": "https://json.schemastore.org/package.json",
   "name": "@rejacky/opencode-insights",
   "version": "0.4.1",
-  "description": "OpenCode plugin for local request capture, TPS metrics, and subagent status visibility.",
+  "description": "OpenCode V2 TUI plugin for token/TPS metrics, session analysis, subagent status, and provider usage.",
   "type": "module",
   "author": "opencode-insights contributors",
   "repository": {
@@ -13,26 +13,13 @@
   "bugs": {
     "url": "https://github.com/Re-Jacky/opencode-insights/issues"
   },
-  "main": "./dist/index.js",
-  "types": "./dist/index.d.ts",
-  "bin": {
-    "opencode-insights": "./dist/cli.js"
-  },
+  "main": "./dist/tui.js",
+  "types": "./dist/tui.d.ts",
   "exports": {
-    ".": {
-      "types": "./dist/index.d.ts",
-      "import": "./dist/index.js",
-      "default": "./dist/index.js"
-    },
     "./tui": {
       "types": "./dist/tui.d.ts",
       "import": "./dist/tui.js",
       "default": "./dist/tui.js"
-    },
-    "./cli": {
-      "types": "./dist/cli.d.ts",
-      "import": "./dist/cli.js",
-      "default": "./dist/cli.js"
     }
   },
   "files": [
@@ -46,20 +33,16 @@
   },
   "scripts": {
     "build": "tsup",
-    "debug": "npm run build && node dist/cli.js debug",
-    "revert-debug": "node dist/cli.js revert",
-    "postinstall": "npm rebuild better-sqlite3",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
     "verify": "npm run typecheck && npm run test && npm run build",
-    "prepack": "npm run build",
     "prepublishOnly": "npm run verify"
   },
   "keywords": [
     "opencode",
     "plugin",
     "llm",
-    "sqlite",
+    "tui",
     "tps",
     "subagent"
   ],
@@ -68,19 +51,15 @@
     "node": ">=22.13"
   },
   "peerDependencies": {
-    "@opencode-ai/plugin": ">=1.15.0 <2",
-    "@opentui/core": ">=0.5.10 <0.6",
-    "@opentui/solid": ">=0.5.10 <0.6",
-    "solid-js": "^1.9.12"
+    "@opentui/core": ">=0.5.10",
+    "@opentui/solid": ">=0.5.10",
+    "solid-js": ">=1.9.0"
   },
   "devDependencies": {
-    "@opencode-ai/plugin": "^1.17.13",
     "@opencode/theme": "^2.0.11",
     "@opentui/core": "^0.5.10",
     "@opentui/solid": "^0.5.10",
-    "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^24.12.2",
-    "@types/sql.js": "^1.4.11",
     "solid-js": "^1.9.12",
     "tsup": "^8.5.1",
     "typescript": "^6.0.3",
@@ -88,8 +67,6 @@
   },
   "dependencies": {
     "@opencode/plugin": "^2.0.11",
-    "better-sqlite3": "^12.11.1",
-    "jsonc-parser": "^3.3.1",
-    "sql.js": "^1.14.1"
+    "jsonc-parser": "^3.3.1"
   }
 }
