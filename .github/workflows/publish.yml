@@ -74,9 +74,30 @@ jobs:
             echo "${package_name}@${package_version} is not published yet; publishing."
           fi
 
+      - name: Resolve the npm dist-tag
+        id: dist_tag
+        shell: bash
+        run: |
+          package_version=$(node -p "require('./package.json').version")
+          if [[ "$package_version" == *-* ]]; then
+            # npm refuses to publish a prerelease without an explicit tag. Use the
+            # prerelease identifier (1.0.0-beta.1 -> beta) so `latest` keeps
+            # pointing at the newest stable release.
+            tag="${package_version#*-}"
+            tag="${tag%%.*}"
+            prerelease=true
+          else
+            tag=latest
+            prerelease=false
+          fi
+
+          echo "tag=${tag}" >> "$GITHUB_OUTPUT"
+          echo "prerelease=${prerelease}" >> "$GITHUB_OUTPUT"
+          echo "Publishing ${package_version} with npm dist-tag ${tag}."
+
       - name: Publish
         if: steps.published.outputs.should_publish == 'true'
-        run: npm publish --access public --provenance
+        run: npm publish --access public --provenance --tag "${{ steps.dist_tag.outputs.tag }}"
 
       - name: Create GitHub Release
         if: steps.published.outputs.should_publish == 'true' || steps.published.outputs.release_exists == 'false'
@@ -142,4 +163,9 @@ jobs:
           notes+="$(build_section "Other" "$other")"
           notes+=$'\n\n---\nPublished to npm: https://www.npmjs.com/package/'"${package_name}"
 
-          gh release create "${tag}" --title "${tag}" --target "${GITHUB_SHA}" --notes "${notes}"
+          prerelease_flag=""
+          if [ "${{ steps.dist_tag.outputs.prerelease }}" = "true" ]; then
+            prerelease_flag="--prerelease"
+          fi
+
+          gh release create "${tag}" --title "${tag}" --target "${GITHUB_SHA}" --notes "${notes}" ${prerelease_flag}

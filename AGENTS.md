@@ -37,4 +37,6 @@ OpenCode V2 TUI plugin `@rejacky/opencode-insights` — reactive sidebar section
 
 ## Release
 
-Pushing to `main` triggers `.github/workflows/publish.yml`: it runs `npm run verify`, then publishes to npm with provenance only if that version isn't already published. To release: bump `version` in package.json and push. Commit messages use `feat:`/`fix:`/`style:` prefixes; release commits are titled `Release <version>`.
+Pushing to `master` (or `main`) triggers `.github/workflows/publish.yml`: it runs `npm run verify`, then publishes to npm with provenance only if that version isn't already published. To release: bump `version` in package.json and push. Commit messages use `feat:`/`fix:`/`style:` prefixes; release commits are titled `Release <version>`.
+
+Prerelease versions publish under their prerelease identifier as the npm dist-tag (`1.0.0-beta.1` → `beta`), so `latest` keeps pointing at the newest stable release; the workflow derives the tag from the version and marks the GitHub release as a prerelease.

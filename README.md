@@ -7,11 +7,17 @@ Live OpenCode TUI sidebars for token/TPS metrics, session analysis, subagent sta
 | opencode-insights   | OpenCode            | Status                                                                 |
 | ------------------- | ------------------- | ---------------------------------------------------------------------- |
 | **1.0.0 and above** | **V2 (`2.0.0+`)**   | Built for OpenCode V2 as a TUI-only plugin. Actively maintained.        |
+| `1.0.0-alpha.N`, `1.0.0-beta.N` | **V2 (`2.0.0+`)** | Prereleases of the same V2-only line, published under the `beta` npm dist-tag. |
 | `0.4.x` and below   | V1                  | Legacy server plugin. Frozen: no V2 support, no longer maintained.      |
 
-**`1.0.0` is the first V2-only release, and every release from `1.0.0` on targets OpenCode V2.**
+**`1.0.0` is the first V2-only release, and every release from `1.0.0` on — prereleases included — targets OpenCode V2.**
 It is built against `@opencode/plugin` v2 and loads through OpenCode's V2 CLI plugin API, so it
 does not run on V1.
+
+> **npm dist-tags.** `latest` still points at the `0.4.x` V1 line, so a bare
+> `opencode plugin add @rejacky/opencode-insights` installs the V1 plugin. The V2
+> prereleases live under the `beta` tag until `1.0.0` is published for real; use
+> `@beta` or an exact version to try them.
 
 - OpenCode **V2** required (`opencode` 2.0.0 or newer; developed against 2.0.11).
 - Node.js **>= 22.13** to build from source. OpenCode supplies the runtime.
@@ -42,9 +48,30 @@ Or add it manually:
 }
 ```
 
-Pin an exact version with `"@rejacky/opencode-insights@1.0.0"`.
+Pin an exact version with `"@rejacky/opencode-insights@<version>"`.
 
 Then restart OpenCode (or reopen the TUI) to load the plugin.
+
+### Try the 1.0.0 prerelease
+
+The V2 line ships as a prerelease first, so issues surface before `latest` moves:
+
+```bash
+opencode plugin add @rejacky/opencode-insights@beta
+```
+
+Or pin the exact version:
+
+```jsonc
+// ~/.config/opencode/cli.json
+{
+  "plugins": ["@rejacky/opencode-insights@1.0.0-beta.1"]
+}
+```
+
+Prereleases require OpenCode V2. They are published under the `beta` npm dist-tag,
+so `latest` keeps resolving to the `0.4.x` V1 plugin until `1.0.0` is published for
+real.
 
 ### Why `cli.json` and not `opencode.json(c)`
 
@@ -67,6 +94,9 @@ opencode plugin update   # update them
 If a version still looks stale, remove the entry from `cli.json`, restart OpenCode,
 and add it again. For local development builds, install a directory path instead —
 see [DEVELOPMENT.md](./DEVELOPMENT.md).
+
+Once `1.0.0` is published, move off the prerelease by changing `@beta` (or the pinned
+prerelease version) to `latest` in `cli.json` and restarting OpenCode.
 
 ## What You Get
 
