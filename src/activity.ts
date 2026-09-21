@@ -52,6 +52,14 @@ export function recordChild(state: ActivityState, sessionID: string, parentID: s
   if (!children.includes(sessionID)) children.push(sessionID);
 }
 
+export function recordSkill(state: ActivityState, sessionID: string, id: string | undefined, name: string): boolean {
+  if (name.length === 0) return false;
+  if (id !== undefined && seen(state, sessionID, `skill:${id}`)) return false;
+  const activity = activityFor(state, sessionID);
+  activity.skills[name] = (activity.skills[name] ?? 0) + 1;
+  return true;
+}
+
 function activityFor(state: ActivityState, sessionID: string): SessionActivity {
   return (state.bySessionID[sessionID] ??= emptyActivity());
 }
@@ -94,14 +102,8 @@ export function recordToolPart(
       }
     }
   }
-  if (part.tool === "skill" && partState?.input && typeof partState.input.name === "string" && partState.input.name.length > 0) {
-    if (part.id !== undefined) {
-      if (!seen(state, sessionID, `skill:${part.id}`)) {
-        activity.skills[partState.input.name] = (activity.skills[partState.input.name] ?? 0) + 1;
-      }
-    } else {
-      activity.skills[partState.input.name] = (activity.skills[partState.input.name] ?? 0) + 1;
-    }
+  if (part.tool === "skill" && partState?.input && typeof partState.input.name === "string") {
+    recordSkill(state, sessionID, part.id, partState.input.name);
   }
   return counted;
 }

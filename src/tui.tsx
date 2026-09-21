@@ -2,10 +2,10 @@
 import { createTextAttributes } from "@opentui/core";
 import { Plugin, usePlugin } from "@opencode/plugin/tui";
 import type { Context } from "@opencode/plugin/tui/context";
-import { createEffect, createMemo, createSignal, For, onMount, Show, type JSX } from "solid-js";
+import { createEffect, createMemo, createSignal, For, Show, type JSX } from "solid-js";
 import { readInsightsConfig, resolveCopilotToken, type InsightsConfig } from "./config.js";
 import { createMetricsState, renderPromptRightMetricsText, renderSessionTokenUsage } from "./metrics.js";
-import { hydrateActivity } from "./activity-hydrate.js";
+import { hydrateInsights, needsHydration } from "./activity-hydrate.js";
 import {
   buildSessionAnalysisRows,
   createActivityState,
@@ -113,7 +113,10 @@ function SessionAnalysisSection(props: {
   const theme = context.theme;
   const [collapsedGroups, setCollapsedGroups] = createSignal<Set<string>>(new Set());
 
-  onMount(props.onHydrate);
+  createEffect(() => {
+    props.sessionID;
+    props.onHydrate();
+  });
 
   const lines = createMemo(() => {
     props.version;
@@ -375,13 +378,15 @@ async function setup(context: Context) {
     if (result.subagents) setSubagentsRev((value) => value + 1);
   });
 
-  const hydrated = new Set<string>();
   const hydrate = (sessionID: string) => {
-    if (!isSessionID(sessionID) || hydrated.has(sessionID)) return;
-    hydrated.add(sessionID);
-    void hydrateActivity(context.data, activity, sessionID)
-      .then(() => setActivityRev((value) => value + 1))
-      .catch(() => hydrated.delete(sessionID));
+    if (!isSessionID(sessionID) || !needsHydration(activity, sessionID)) return;
+    void hydrateInsights(context.data, state, sessionID)
+      .then(() => {
+        setActivityRev((value) => value + 1);
+        setMetricsRev((value) => value + 1);
+        setSubagentsRev((value) => value + 1);
+      })
+      .catch(() => undefined);
   };
 
   const unregisterSidebar = context.ui.slot({

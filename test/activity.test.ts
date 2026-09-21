@@ -10,6 +10,7 @@ import {
   mergeActivity,
   recordChild,
   recordCompaction,
+  recordSkill,
   recordStep,
   recordToolPart,
   treeActivity,
@@ -95,6 +96,17 @@ describe("activity state", () => {
     recordToolPart(state, "ses_a", { id: "prt_skill", tool: "skill", state: { status: "completed", input: { name: "brainstorming" } } });
     expect(state.bySessionID["ses_a"]?.skills).toEqual({ brainstorming: 1 });
     expect(state.bySessionID["ses_a"]?.toolCalls).toBe(1);
+  });
+
+  test("recordSkill counts a skill once per id and ignores empty names", () => {
+    const state = createActivityState();
+    expect(recordSkill(state, "ses_a", "skl_1", "brainstorming")).toBe(true);
+    expect(recordSkill(state, "ses_a", "skl_1", "brainstorming")).toBe(false);
+    expect(recordSkill(state, "ses_a", "skl_2", "brainstorming")).toBe(true);
+    expect(recordSkill(state, "ses_a", undefined, "tdd")).toBe(true);
+    expect(recordSkill(state, "ses_a", undefined, "tdd")).toBe(true);
+    expect(recordSkill(state, "ses_a", "skl_3", "")).toBe(false);
+    expect(state.bySessionID["ses_a"]?.skills).toEqual({ brainstorming: 2, tdd: 2 });
   });
 
   test("recordToolPart counts distinct tools in the breakdown", () => {

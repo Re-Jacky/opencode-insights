@@ -1,13 +1,32 @@
-import { recordChild, recordCompaction, recordToolPart, type ActivityState } from "./activity.js";
+import { recordChild, recordCompaction, recordSkill, recordToolPart, type ActivityState } from "./activity.js";
+import type { CopilotProviderTracker } from "./copilot-usage.js";
+import type { GoProviderTracker } from "./go-usage.js";
+import { recordAssistantMessage, type MetricsState } from "./metrics.js";
+import { recordSubagentFromSessionInfo, type SubagentState } from "./subagents.js";
+
+export type ActivitySession = {
+  id: string;
+  parentID?: string;
+  title?: string;
+  model?: { providerID?: string };
+};
 
 export type ActivityData = {
   session: {
-    list(): Array<{ id: string; parentID?: string; title?: string }>;
+    list(): ActivitySession[];
     message: {
       sync(sessionID: string): Promise<void>;
       list(sessionID: string): Array<Record<string, unknown>>;
     };
   };
+};
+
+export type HydrationState = {
+  activity: ActivityState;
+  metrics: MetricsState;
+  subagents: SubagentState;
+  goProviders: GoProviderTracker;
+  copilotProviders: CopilotProviderTracker;
 };
 
 const CONCURRENCY_LIMIT = 4;
@@ -22,6 +41,35 @@ function isSessionID(value: string): boolean {
 
 function stringFrom(value: unknown): string | undefined {
   return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
+function numberFrom(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+type HydratedUsage = {
+  inputTokens?: number;
+  outputTokens?: number;
+  reasoningTokens?: number;
+  cacheReadTokens?: number;
+  cacheWriteTokens?: number;
+};
+
+function tokenUsage(value: unknown): HydratedUsage {
+  if (!isRecord(value)) return {};
+  const cache = isRecord(value.cache) ? value.cache : {};
+  const usage: HydratedUsage = {};
+  const input = numberFrom(value.input);
+  if (input !== undefined) usage.inputTokens = input;
+  const output = numberFrom(value.output);
+  if (output !== undefined) usage.outputTokens = output;
+  const reasoning = numberFrom(value.reasoning);
+  if (reasoning !== undefined) usage.reasoningTokens = reasoning;
+  const cacheRead = numberFrom(cache.read);
+  if (cacheRead !== undefined) usage.cacheReadTokens = cacheRead;
+  const cacheWrite = numberFrom(cache.write);
+  if (cacheWrite !== undefined) usage.cacheWriteTokens = cacheWrite;
+  return usage;
 }
 
 async function mapConcurrent<T, R>(items: T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
@@ -39,8 +87,12 @@ async function mapConcurrent<T, R>(items: T[], limit: number, fn: (item: T) => P
   return results;
 }
 
-function collectUnhydrated(state: ActivityState, rootSessionID: string): string[] {
-  const visited = new Set<string>();
+/** A session should be hydrated unless it already succeeded or is currently in flight. */
+export function needsHydration(state: ActivityState, sessionID: string): boolean {
+  return !state.hydrated.has(sessionID) && !state.loading.has(sessionID);
+}
+
+function collectUnhydrated(state: ActivityState, rootSessionID: string): string[] {  const visited = new Set<string>();
   const result: string[] = [];
   const stack = [rootSessionID];
   while (stack.length > 0) {
@@ -55,37 +107,88 @@ function collectUnhydrated(state: ActivityState, rootSessionID: string): string[
   return result;
 }
 
-function applyContent(state: ActivityState, sessionID: string, content: Array<Record<string, unknown>>): void {
+function recordProvider(state: HydrationState, sessionID: string, providerID: string | undefined): void {
+  if (!providerID) return;
+  state.goProviders.record(sessionID, providerID);
+  state.copilotProviders.record(sessionID, providerID);
+}
+
+function applyToolContent(state: ActivityState, sessionID: string, content: Array<Record<string, unknown>>): void {
   for (const item of content) {
+    if (item.type !== "tool" || typeof item.name !== "string") continue;
     const id = stringFrom(item.id);
-    if (item.type === "tool" && typeof item.name === "string") {
-      const toolState = isRecord(item.state) ? item.state : undefined;
-      const status = stringFrom(toolState?.status);
-      const error = isRecord(toolState?.error) ? stringFrom(toolState.error.message) : undefined;
-      const input = isRecord(toolState?.input) ? toolState.input : undefined;
-      recordToolPart(state, sessionID, {
-        ...(id !== undefined ? { id } : {}),
-        tool: item.name,
-        ...(toolState
-          ? {
-              state: {
-                ...(status !== undefined ? { status } : {}),
-                ...(input !== undefined ? { input: input as { name?: string } } : {}),
-                ...(error !== undefined ? { error } : {})
-              }
+    const toolState = isRecord(item.state) ? item.state : undefined;
+    const status = stringFrom(toolState?.status);
+    const error = isRecord(toolState?.error) ? stringFrom(toolState.error.message) : undefined;
+    const input = isRecord(toolState?.input) ? toolState.input : undefined;
+    recordToolPart(state, sessionID, {
+      ...(id !== undefined ? { id } : {}),
+      tool: item.name,
+      ...(toolState
+        ? {
+            state: {
+              ...(status !== undefined ? { status } : {}),
+              ...(input !== undefined ? { input: input as { name?: string } } : {}),
+              ...(error !== undefined ? { error } : {})
             }
-          : {})
-      });
-    } else if (item.type === "compaction" && id !== undefined) {
-      recordCompaction(state, sessionID, id, item.reason === "auto");
-    }
+          }
+        : {})
+    });
   }
 }
 
-export async function hydrateActivity(data: ActivityData, state: ActivityState, rootSessionID: string): Promise<void> {
+/**
+ * Applies one persisted V2 `SessionMessageInfo` variant. Compaction and skill are
+ * top-level message variants in V2 (not items inside assistant `content`).
+ */
+function applyMessage(state: HydrationState, sessionID: string, message: Record<string, unknown>): void {
+  const type = stringFrom(message.type);
+  if (type === "assistant") {
+    const content = Array.isArray(message.content) ? message.content.filter(isRecord) : [];
+    if (content.length > 0) applyToolContent(state.activity, sessionID, content);
+
+    const messageID = stringFrom(message.id);
+    const time = isRecord(message.time) ? message.time : {};
+    const createdAt = numberFrom(time.created);
+    const completedAt = numberFrom(time.completed) ?? createdAt;
+    const finish = stringFrom(message.finish);
+    if (messageID !== undefined && createdAt !== undefined && completedAt !== undefined) {
+      recordAssistantMessage(state.metrics, {
+        sessionID,
+        messageID,
+        createdAt,
+        completedAt,
+        ...tokenUsage(message.tokens),
+        ...(finish !== undefined ? { finish } : {})
+      });
+    }
+
+    const model = isRecord(message.model) ? message.model : undefined;
+    recordProvider(state, sessionID, model ? stringFrom(model.providerID) : undefined);
+    return;
+  }
+
+  if (type === "compaction") {
+    const id = stringFrom(message.id);
+    if (id !== undefined) recordCompaction(state.activity, sessionID, id, message.reason === "auto");
+    return;
+  }
+
+  if (type === "skill") {
+    const name = stringFrom(message.name) ?? stringFrom(message.skill);
+    if (name !== undefined) recordSkill(state.activity, sessionID, stringFrom(message.id), name);
+  }
+}
+
+/**
+ * Backfills activity, token metrics, subagents, and provider tracking for a session
+ * tree from the V2 `Data` API. Per-session failures leave the session unhydrated so a
+ * later call retries it.
+ */
+export async function hydrateInsights(data: ActivityData, state: HydrationState, rootSessionID: string): Promise<void> {
   if (!isSessionID(rootSessionID)) return;
 
-  let sessions: Array<{ id: string; parentID?: string; title?: string }> = [];
+  let sessions: ActivitySession[] = [];
   try {
     sessions = data.session.list();
   } catch {
@@ -93,25 +196,26 @@ export async function hydrateActivity(data: ActivityData, state: ActivityState, 
   }
   for (const session of sessions) {
     if (!session.id) continue;
-    if (session.title) state.titles[session.id] = session.title;
-    if (session.parentID) recordChild(state, session.id, session.parentID);
+    if (session.title) state.activity.titles[session.id] = session.title;
+    if (session.parentID) {
+      recordChild(state.activity, session.id, session.parentID);
+      recordSubagentFromSessionInfo(state.subagents, session);
+    }
+    recordProvider(state, session.id, session.model?.providerID);
   }
 
-  const toHydrate = collectUnhydrated(state, rootSessionID);
-  for (const sessionID of toHydrate) state.loading.add(sessionID);
+  const toHydrate = collectUnhydrated(state.activity, rootSessionID);
+  for (const sessionID of toHydrate) state.activity.loading.add(sessionID);
   await mapConcurrent(toHydrate, CONCURRENCY_LIMIT, async (sessionID) => {
     try {
       await data.session.message.sync(sessionID);
       const messages = data.session.message.list(sessionID);
-      for (const message of messages) {
-        const content = Array.isArray(message.content) ? message.content.filter(isRecord) : [];
-        if (content.length > 0) applyContent(state, sessionID, content);
-      }
-      state.hydrated.add(sessionID);
+      for (const message of messages) applyMessage(state, sessionID, message);
+      state.activity.hydrated.add(sessionID);
     } catch {
       // leave unhydrated so the next navigation retries
     } finally {
-      state.loading.delete(sessionID);
+      state.activity.loading.delete(sessionID);
     }
   });
 }

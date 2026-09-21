@@ -114,6 +114,17 @@ describe("applyInsightEvent", () => {
     expect(s.goProviders.usesOpenCodeGo("ses_child")).toBe(false);
   });
 
+  test("records skills from session.skill.activated", () => {
+    const { state: s, activity } = state();
+    const result = applyInsightEvent(s, {
+      type: "session.skill.activated",
+      created: 1,
+      data: { sessionID: "ses_a", id: "sk1", name: "brainstorming", text: "" }
+    });
+    expect(result.activity).toBe(true);
+    expect(activity.bySessionID["ses_a"]?.skills).toEqual({ brainstorming: 1 });
+  });
+
   test("ignores malformed events without throwing", () => {
     const { state: s } = state();
     for (const bad of [

@@ -1,4 +1,4 @@
-import { recordChild, recordCompaction, recordStep, recordToolPart, type ActivityState } from "./activity.js";
+import { recordChild, recordCompaction, recordSkill, recordStep, recordToolPart, type ActivityState } from "./activity.js";
 import type { CopilotProviderTracker } from "./copilot-usage.js";
 import type { GoProviderTracker } from "./go-usage.js";
 import {
@@ -192,6 +192,13 @@ export function applyInsightEvent(state: InsightState, event: unknown): InsightE
       const id = str(event.id);
       if (!sessionID || !id) break;
       if (recordCompaction(state.activity, sessionID, id, data.reason === "auto")) result.activity = true;
+      break;
+    }
+    case "session.skill.activated": {
+      const id = str(data.id);
+      const name = str(data.name) ?? str(data.skill);
+      if (!sessionID || !name) break;
+      if (recordSkill(state.activity, sessionID, id, name)) result.activity = true;
       break;
     }
     case "session.created": {
