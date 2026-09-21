@@ -9,7 +9,7 @@ import {
   type HydrationState
 } from "../src/activity-hydrate.js";
 import { createGoProviderTracker } from "../src/go-usage.js";
-import { createMetricsState } from "../src/metrics.js";
+import { createMetricsState, getTurnAverage } from "../src/metrics.js";
 
 function state(): HydrationState {
   const activity = createActivityState();
@@ -87,6 +87,40 @@ describe("hydrateInsights", () => {
     // 50 tokens over the persisted 4s streamed window (1000 -> 5000), matching
     // the native message header rather than the shorter completed-created span.
     expect(s.metrics.messageMetricsByID["msg_1"]).toMatchObject({ totalTokens: 50, durationMs: 4_000 });
+  });
+
+  test("delimits hydrated turns at idle markers so AVG covers the last turn", async () => {
+    const s = state();
+    const data: ActivityData = {
+      session: {
+        list: () => [{ id: "ses_root" }],
+        message: {
+          sync: async () => {},
+          list: () => [
+            // An earlier turn, closed by an idle marker.
+            {
+              type: "assistant",
+              id: "msg_old",
+              time: { created: 1_000, streamed: 5_000, completed: 5_100 },
+              tokens: { input: 1, output: 400, reasoning: 0, cache: { read: 0, write: 0 } }
+            },
+            { type: "idle", id: "idle_1", time: { created: 5_200 } },
+            // The turn that is still current.
+            {
+              type: "assistant",
+              id: "msg_new",
+              time: { created: 10_000, streamed: 11_000, completed: 11_100 },
+              tokens: { input: 1, output: 50, reasoning: 0, cache: { read: 0, write: 0 } }
+            }
+          ]
+        }
+      }
+    };
+
+    await hydrateInsights(data, s, "ses_root");
+
+    // 50 tokens over 1s — the idle marker means the earlier turn does not count.
+    expect(getTurnAverage(s.metrics, "ses_root")).toBe(50);
   });
 
   test("reads skill hits from hydrated skill tool parts", async () => {

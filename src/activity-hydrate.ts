@@ -1,7 +1,7 @@
 import { recordChild, recordCompaction, recordSkill, recordToolPart, type ActivityState, type ToolPartInput } from "./activity.js";
 import type { CopilotProviderTracker } from "./copilot-usage.js";
 import type { GoProviderTracker } from "./go-usage.js";
-import { recordAssistantMessage, type MetricsState } from "./metrics.js";
+import { recordAssistantMessage, resetTurnAverage, type MetricsState } from "./metrics.js";
 
 export type ActivitySession = {
   id: string;
@@ -166,7 +166,8 @@ function applyMessage(state: HydrationState, sessionID: string, message: Record<
     const messageID = stringFrom(message.id);
     const time = isRecord(message.time) ? message.time : {};
     const createdAt = numberFrom(time.created);
-    const completedAt = numberFrom(time.completed) ?? createdAt;
+    const completed = numberFrom(time.completed);
+    const completedAt = completed ?? createdAt;
     const streamedAt = numberFrom(time.streamed);
     const finish = stringFrom(message.finish);
     if (messageID !== undefined && createdAt !== undefined && completedAt !== undefined) {
@@ -175,7 +176,10 @@ function applyMessage(state: HydrationState, sessionID: string, message: Record<
         messageID,
         createdAt,
         completedAt,
-        ...(streamedAt !== undefined ? { streamedAt } : {}),
+        // `completedAt` is synthesized for an in-flight message so its usage still
+        // counts, but the turn average only covers finished steps — the same rule
+        // as the live path, which records a step when the host completes it.
+        ...(completed !== undefined && streamedAt !== undefined ? { streamedAt } : {}),
         ...tokenUsage(message.tokens),
         ...(finish !== undefined ? { finish } : {})
       });
@@ -183,6 +187,13 @@ function applyMessage(state: HydrationState, sessionID: string, message: Record<
 
     const model = isRecord(message.model) ? message.model : undefined;
     recordProvider(state, sessionID, model ? stringFrom(model.providerID) : undefined);
+    return;
+  }
+
+  if (type === "idle") {
+    // The host marks the end of an execution with an idle record; the native
+    // header's tok/s only ever covers the steps after the last one.
+    resetTurnAverage(state.metrics, sessionID);
     return;
   }
 

@@ -21,13 +21,22 @@ export type SessionAverage = {
 };
 
 /**
- * Per-message metrics for input-box (current round).
- * AVG mirrors the native message header's `tok/s`: (output+reasoning) tokens over
- * `time.streamed - time.created`, i.e. step start → stream end, which includes the
- * reasoning phase and TTFT. Falls back to completed-created when streamed is unknown.
- * TTFT = first token of any kind (text or reasoning) - requestStartAt. TPS = live
- * estimated tokens / active burst duration (5s window) for this messageID only.
- * Session totals (Token Usage sidebar) remain in SessionTokenUsage/sessionAverageByID (deprecated for prompt-right).
+ * One completed step of the current turn: its (output + reasoning) tokens and its
+ * `time.streamed - time.created` span. The turn's tok/s is Σtokens / Σspans over
+ * every step since the last turn boundary, which is what the native message header
+ * shows. Steps without a `time.streamed` stamp contribute nothing, as on the host.
+ */
+export type TurnStep = {
+  tokens: number;
+  durationMs: number;
+};
+
+/**
+ * Per-message metrics for input-box (current round). TTFT = first token of any
+ * kind (text or reasoning) - requestStartAt; the session fallback stays in
+ * `sessionAverageByID`. TPS = live estimated tokens / active burst duration (5s
+ * window) for this messageID only. AVG is the `turnStepsBySession` turn average,
+ * not a per-message figure.
  */
 export type MessageMetrics = {
   totalTokens: number;
@@ -65,6 +74,7 @@ export type MetricsState = {
   streamSamplesByMessageID: Record<string, StreamSample[]>;
   messageTimingByID: Record<string, MessageTiming>;
   messageMetricsByID: Record<string, MessageMetrics>;
+  turnStepsBySession: Record<string, Record<string, TurnStep>>;
   latestMessageIDBySession: Record<string, string>;
   sessionAverageByID: Record<string, SessionAverage>;
   latestResponseUsageBySession: Record<string, AssistantResponseUsage>;
@@ -82,6 +92,7 @@ export function createMetricsState(): MetricsState {
     streamSamplesByMessageID: {},
     messageTimingByID: {},
     messageMetricsByID: {},
+    turnStepsBySession: {},
     latestMessageIDBySession: {},
     sessionAverageByID: {},
     latestResponseUsageBySession: {},
@@ -150,6 +161,7 @@ export function recordAssistantMessage(
 
   const timing = state.messageTimingByID[input.messageID];
   const totalTokens = (input.outputTokens ?? 0) + (input.reasoningTokens ?? 0);
+  const streamed = input.streamedAt ?? timing?.streamedAt;
 
   let durationMs: number | undefined;
   let ttftMs: number | undefined;
@@ -158,15 +170,27 @@ export function recordAssistantMessage(
     const first = timing.firstTokenAt ?? timing.firstResponseAt!;
     // Native parity: the average covers the step's streaming window
     // (step start -> stream end), which includes TTFT and the reasoning phase.
-    const streamed = input.streamedAt ?? timing.streamedAt;
     const endAt = streamed ?? (input.finish === "tool-calls" ? (timing.lastToolCallAt ?? input.completedAt) : input.completedAt);
     durationMs = typeof endAt === "number" ? Math.max(endAt - timing.requestStartAt, 1) : undefined;
     ttftMs = Math.max(first - timing.requestStartAt, 0);
   } else {
     // Hydration or race: no stream timing, fallback to the persisted streamed span then wall time
-    const endAt = input.streamedAt ?? input.completedAt;
+    const endAt = streamed ?? input.completedAt;
     durationMs = Math.max(endAt - input.createdAt, 1);
     ttftMs = undefined;
+  }
+
+  // Native parity: the header's tok/s sums (output + reasoning) over every step of
+  // the turn and divides by the sum of their streamed spans. Keyed by messageID so
+  // a multi-step message keeps one entry — its latest tokens over the span from its
+  // first step start, which is the host's row-level value — and so a hydrated
+  // replay of a step the live stream already recorded replaces it instead of
+  // counting it twice. Zero-token steps still count their span, as on the host.
+  if (typeof streamed === "number") {
+    const startAt = timing?.sessionID === input.sessionID ? timing.requestStartAt : input.createdAt;
+    const steps = state.turnStepsBySession[input.sessionID] ?? {};
+    steps[input.messageID] = { tokens: totalTokens, durationMs: Math.max(streamed - startAt, 1) };
+    state.turnStepsBySession[input.sessionID] = steps;
   }
 
   if (totalTokens > 0 && durationMs) {
@@ -276,7 +300,7 @@ export function renderMetricsText(
   const live = liveTps(state, sessionID, options) ?? "-";
   const msgID = state.latestMessageIDBySession[sessionID];
   const hasPerMessage = !!msgID && !!state.messageMetricsByID[msgID];
-  const avg = hasPerMessage ? (messageAverage(state, sessionID) ?? "-") : (sessionAverage(state, sessionID) ?? "-");
+  const avg = turnAverageText(state, sessionID) ?? "-";
   const ttft = hasPerMessage ? (messageTtft(state, sessionID) ?? "-") : (sessionTtft(state, sessionID) ?? "-");
   return `TPS ${live} | AVG ${avg} | TTFT ${ttft}`;
 }
@@ -306,7 +330,7 @@ export function renderPromptRightMetricsText(
   const cacheRate = usage ? cacheReadRate(usage) : undefined;
   const msgID = state.latestMessageIDBySession[sessionID];
   const hasPerMessage = !!msgID && !!state.messageMetricsByID[msgID];
-  const avgVal = hasPerMessage ? messageAverage(state, sessionID) : sessionAverage(state, sessionID);
+  const avgVal = turnAverageText(state, sessionID);
   const ttftVal = hasPerMessage ? messageTtft(state, sessionID) : sessionTtft(state, sessionID);
   const values: Record<PromptRightMetric, string> = {
     tps: `TPS ${liveTps(state, sessionID, options) ?? "-"}`,
@@ -388,12 +412,32 @@ function rebuildSessionTokenUsage(state: MetricsState, sessionID: string) {
   state.sessionTokenUsageByID[sessionID] = usage;
 }
 
-function messageAverage(state: MetricsState, sessionID: string) {
-  const msgID = state.latestMessageIDBySession[sessionID];
-  if (!msgID) return undefined;
-  const m = state.messageMetricsByID[msgID];
-  if (!m || m.totalTokens <= 0 || m.durationMs <= 0) return undefined;
-  return formatRate(m.totalTokens / (m.durationMs / 1000), "AVG");
+/**
+ * The current turn's tok/s, exactly as the native message header computes it:
+ * Σ(output + reasoning) over every step of the turn ÷ Σ(step streamed spans).
+ * `undefined` until the turn has a step that streamed.
+ */
+export function getTurnAverage(state: MetricsState, sessionID: string): number | undefined {
+  const steps = state.turnStepsBySession[sessionID];
+  if (!steps) return undefined;
+  let tokens = 0;
+  let durationMs = 0;
+  for (const step of Object.values(steps)) {
+    tokens += step.tokens;
+    durationMs += step.durationMs;
+  }
+  if (tokens <= 0 || durationMs <= 0) return undefined;
+  return tokens / (durationMs / 1000);
+}
+
+/** Forgets the finished turn. Called when a new execution starts (a new turn begins). */
+export function resetTurnAverage(state: MetricsState, sessionID: string): void {
+  delete state.turnStepsBySession[sessionID];
+}
+
+function turnAverageText(state: MetricsState, sessionID: string) {
+  const value = getTurnAverage(state, sessionID);
+  return value === undefined ? undefined : formatRate(value, "AVG");
 }
 
 function messageTtft(state: MetricsState, sessionID: string) {
@@ -402,12 +446,6 @@ function messageTtft(state: MetricsState, sessionID: string) {
   const m = state.messageMetricsByID[msgID];
   if (!m || m.ttftMs === undefined || m.ttftMs < 0) return undefined;
   return formatTtft(m.ttftMs / 1000);
-}
-
-function sessionAverage(state: MetricsState, sessionID: string) {
-  const totals = state.sessionAverageByID[sessionID];
-  if (!totals || totals.totalTokens <= 0 || totals.totalDurationMs <= 0) return undefined;
-  return formatRate(totals.totalTokens / (totals.totalDurationMs / 1000), "AVG");
 }
 
 function sessionTtft(state: MetricsState, sessionID: string) {

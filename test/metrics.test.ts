@@ -2,13 +2,16 @@ import { describe, expect, test } from "vitest";
 import {
   createMetricsState,
   estimateStreamTokens,
+  getTurnAverage,
   recordAssistantDelta,
   recordAssistantMessage,
   renderPromptRightMetricsText,
   renderResponseMetricsText,
   renderMetricsText,
+  resetTurnAverage,
   getSessionTokenUsage,
-  renderSessionTokenUsage
+  renderSessionTokenUsage,
+  type MetricsState
 } from "../src/metrics.js";
 
 describe("metrics tracking", () => {
@@ -41,6 +44,7 @@ describe("metrics tracking", () => {
       sessionID: "ses_1",
       messageID: "msg_1",
       createdAt: 1_000,
+      streamedAt: 3_000,
       completedAt: 3_000,
       outputTokens: 40,
       reasoningTokens: 10
@@ -101,9 +105,10 @@ describe("metrics tracking", () => {
     expect(renderResponseMetricsText(state, "ses_1")).toBe(
       "10.4k used | 90.00% cache | 200 out | 50 think"
     );
-    // Per-message AVG now computed via wall time fallback (250 tok /2s =125) even without prior timing (hydrate)
+    // A response with no `time.streamed` contributes no AVG, like the native
+    // header (which needs the stream span to compute tok/s).
     expect(renderPromptRightMetricsText(state, "ses_1", { idle: true })).toBe(
-      "TPS - | AVG 125 | 10.4k used | 90.00% cache"
+      "TPS - | AVG - | 10.4k used | 90.00% cache"
     );
     expect(renderPromptRightMetricsText(state, "ses_1", { idle: true, metrics: ["used", "cache"] })).toBe(
       "10.4k used | 90.00% cache"
@@ -212,5 +217,99 @@ describe("metrics tracking", () => {
 
     const result = renderSessionTokenUsage(state, "ses_1", 0);
     expect(result).not.toContain("used by subagents");
+  });
+});
+
+describe("turn-average AVG (native message-header parity)", () => {
+  /** One completed step of a turn: tokens over its `time.streamed - time.created` span. */
+  function step(state: MetricsState, messageID: string, createdAt: number, streamedAt: number, outputTokens: number, reasoningTokens = 0) {
+    recordAssistantMessage(state, {
+      sessionID: "ses_1",
+      messageID,
+      createdAt,
+      streamedAt,
+      completedAt: streamedAt + 20,
+      outputTokens,
+      reasoningTokens
+    });
+  }
+
+  const avg = (state: MetricsState) => renderPromptRightMetricsText(state, "ses_1", { idle: true, metrics: ["avg"] });
+
+  test("reproduces the native turn figure for a real turn", () => {
+    const state = createMetricsState();
+    // One real turn from a live session: 19 steps, verified against the native
+    // message header, which reports 6m 24s · 84.2 tok/s for it.
+    const turn: Array<[tokens: number, streamMs: number]> = [
+      [338, 4_245], [103, 2_742], [438, 3_645], [89, 3_225], [81, 3_210], [142, 3_736], [1_534, 10_163],
+      [281, 3_902], [205, 3_961], [300, 3_278], [544, 5_234], [1_045, 7_878], [197, 4_276], [790, 6_438],
+      [449, 5_044], [561, 4_955], [97, 2_710], [1_077, 20_552], [393, 3_727]
+    ];
+    let at = 1_000;
+    for (const [index, [tokens, streamMs]] of turn.entries()) {
+      step(state, `msg_${index}`, at, at + streamMs, tokens);
+      at += streamMs;
+    }
+
+    expect(avg(state)).toBe("AVG 84.2");
+  });
+
+  test("averages every step of the turn, not just the latest step", () => {
+    const state = createMetricsState();
+    step(state, "msg_1", 1_000, 5_000, 40, 10); // 50 tok / 4.0s = 12.5
+    step(state, "msg_2", 6_000, 8_000, 10, 0); // 10 tok / 2.0s = 5.0
+    step(state, "msg_3", 9_000, 12_000, 300, 0); // 300 tok / 3.0s = 100.0
+
+    // Σ tokens / Σ stream spans = 360 / 9s, not the latest step's 100.
+    expect(avg(state)).toBe("AVG 40.0");
+  });
+
+  test("starts over when a new turn begins", () => {
+    const state = createMetricsState();
+    step(state, "msg_1", 1_000, 3_000, 50);
+
+    expect(avg(state)).toBe("AVG 25.0");
+
+    resetTurnAverage(state, "ses_1");
+    expect(avg(state)).toBe("AVG -");
+
+    step(state, "msg_2", 10_000, 12_000, 400);
+    expect(avg(state)).toBe("AVG 200");
+  });
+
+  test("ignores steps without a streamed stamp", () => {
+    const state = createMetricsState();
+    recordAssistantMessage(state, {
+      sessionID: "ses_1",
+      messageID: "msg_wall",
+      createdAt: 1_000,
+      completedAt: 5_000,
+      outputTokens: 400
+    });
+    expect(avg(state)).toBe("AVG -");
+
+    step(state, "msg_streamed", 6_000, 7_000, 100);
+    expect(avg(state)).toBe("AVG 100");
+  });
+
+  test("replaces a step's contribution when the same message is recorded again", () => {
+    const state = createMetricsState();
+    // A multi-step message, or a hydrated replay of a step the live stream already
+    // recorded, must keep one entry: the turn must not count it twice, and the
+    // latest values win.
+    step(state, "msg_1", 1_000, 5_000, 40, 10);
+    expect(avg(state)).toBe("AVG 12.5");
+
+    step(state, "msg_1", 1_000, 6_000, 60, 10);
+
+    expect(avg(state)).toBe("AVG 14.0");
+  });
+
+  test("reports no average before the first completed step", () => {
+    const state = createMetricsState();
+    recordAssistantMessage(state, { sessionID: "ses_1", messageID: "msg_1", createdAt: 1_000 });
+
+    expect(avg(state)).toBe("AVG -");
+    expect(getTurnAverage(state, "ses_1")).toBeUndefined();
   });
 });

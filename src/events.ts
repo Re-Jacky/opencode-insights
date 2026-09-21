@@ -6,6 +6,7 @@ import {
   recordAssistantMessage,
   recordStreamedAt,
   recordToolActivity,
+  resetTurnAverage,
   type MetricsState
 } from "./metrics.js";
 
@@ -236,7 +237,14 @@ export function applyInsightEvent(state: InsightState, event: unknown): InsightE
       result.subagents = true;
       break;
     }
-    case "session.execution.started":
+    case "session.execution.started": {
+      // A new execution opens a new turn, and the native header's tok/s only ever
+      // covers the steps of one turn.
+      if (sessionID) resetTurnAverage(state.metrics, sessionID);
+      result.metrics = true;
+      result.subagents = true;
+      break;
+    }
     case "session.execution.succeeded":
     case "session.execution.failed":
     case "session.execution.interrupted":

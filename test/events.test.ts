@@ -3,7 +3,7 @@ import { createActivityState } from "../src/activity.js";
 import { createCopilotProviderTracker } from "../src/copilot-usage.js";
 import { applyInsightEvent, createInsightState } from "../src/events.js";
 import { createGoProviderTracker } from "../src/go-usage.js";
-import { createMetricsState } from "../src/metrics.js";
+import { createMetricsState, getTurnAverage } from "../src/metrics.js";
 
 function state() {
   const activity = createActivityState();
@@ -236,6 +236,44 @@ describe("applyInsightEvent", () => {
     expect(activity.bySessionID["ses_a"]?.toolCalls).toBe(1);
     expect(activity.bySessionID["ses_a"]?.warnings).toBe(1);
     expect(activity.bySessionID["ses_a"]?.autoCompacts).toBe(1);
+  });
+
+  test("starts the turn average over on a new execution", () => {
+    const { state: s } = state();
+    applyInsightEvent(s, {
+      type: "session.step.started",
+      created: 1_000,
+      data: { sessionID: "ses_a", assistantMessageID: "msg_1", started: 1_000 }
+    });
+    applyInsightEvent(s, {
+      type: "session.step.streamed",
+      created: 3_000,
+      data: { sessionID: "ses_a", assistantMessageID: "msg_1" }
+    });
+    applyInsightEvent(s, {
+      type: "session.step.ended",
+      created: 3_100,
+      data: {
+        sessionID: "ses_a",
+        assistantMessageID: "msg_1",
+        finish: "stop",
+        tokens: { input: 10, output: 40, reasoning: 10, cache: { read: 0, write: 0 } }
+      }
+    });
+
+    // 50 tokens over the step's 2s stream window.
+    expect(getTurnAverage(s.metrics, "ses_a")).toBe(25);
+
+    const result = applyInsightEvent(s, {
+      type: "session.execution.started",
+      created: 9_000,
+      data: { sessionID: "ses_a" }
+    });
+
+    // A new execution is a new turn: the finished turn must not bleed into it.
+    expect(getTurnAverage(s.metrics, "ses_a")).toBeUndefined();
+    expect(result.metrics).toBe(true);
+    expect(result.subagents).toBe(true);
   });
 
   test("records child sessions, titles, and providers on session.created", () => {
