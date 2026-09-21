@@ -1,4 +1,4 @@
-import type { GoUsageConfig, InsightsConfig } from "./capture.js";
+import type { GoUsageConfig, InsightsConfig } from "./config.js";
 
 export type GoUsageLimit = {
   status: string;

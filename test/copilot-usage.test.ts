@@ -10,7 +10,7 @@ import {
   formatCopilotUsageRow,
   type CopilotUsage
 } from "../src/copilot-usage.js";
-import type { InsightsConfig } from "../src/capture.js";
+import type { InsightsConfig } from "../src/config.js";
 
 const FIXTURE: CopilotUsage = JSON.parse(
   await readFile(new URL("./fixtures/copilot-user.json", import.meta.url), "utf8")

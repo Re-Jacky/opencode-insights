@@ -12,7 +12,7 @@ import {
   goUsageSectionVisible,
   parseGoUsageHtml
 } from "../src/go-usage.js";
-import type { InsightsConfig } from "../src/capture.js";
+import type { InsightsConfig } from "../src/config.js";
 
 const FIXTURE = await readFile(new URL("./fixtures/go-usage-page.html", import.meta.url), "utf8");
 

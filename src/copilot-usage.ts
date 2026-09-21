@@ -1,4 +1,4 @@
-import type { CopilotUsageConfig, InsightsConfig } from "./capture.js";
+import type { CopilotUsageConfig, InsightsConfig } from "./config.js";
 import { formatUsageBar } from "./go-usage.js";
 
 export type CopilotQuotaSnapshot = {
