@@ -2,8 +2,8 @@
 import { createTextAttributes } from "@opentui/core";
 import { Plugin, usePlugin } from "@opencode/plugin/tui";
 import type { Context } from "@opencode/plugin/tui/context";
-import { createMemo, createSignal, For, onMount, Show, type JSX } from "solid-js";
-import { readInsightsConfig, type InsightsConfig } from "./config.js";
+import { createEffect, createMemo, createSignal, For, onMount, Show, type JSX } from "solid-js";
+import { readInsightsConfig, resolveCopilotToken, type InsightsConfig } from "./config.js";
 import { createMetricsState, renderPromptRightMetricsText, renderSessionTokenUsage } from "./metrics.js";
 import { hydrateActivity } from "./activity-hydrate.js";
 import {
@@ -16,8 +16,21 @@ import {
   type SessionAnalysisRow
 } from "./activity.js";
 import { createSubagentState, getSubagentSidebarModel, sumSubagentTokens } from "./subagents.js";
-import { createGoProviderTracker } from "./go-usage.js";
-import { createCopilotProviderTracker } from "./copilot-usage.js";
+import {
+  createGoUsageRefresher,
+  formatGoUsageRow,
+  goUsageRows,
+  goUsageSectionVisible,
+  createGoProviderTracker,
+  type GoUsageRow
+} from "./go-usage.js";
+import {
+  copilotUsageRow,
+  copilotUsageSectionVisible,
+  createCopilotUsageRefresher,
+  createCopilotProviderTracker,
+  formatCopilotUsageRow
+} from "./copilot-usage.js";
 import { applyInsightEvent, createInsightState, type InsightState } from "./events.js";
 
 const bold = createTextAttributes({ bold: true });
@@ -244,6 +257,92 @@ function SubagentsSection(props: { sessionID: string; state: InsightState; versi
   );
 }
 
+function GoUsageSection(props: {
+  sessionID: string;
+  state: InsightState;
+  config: InsightsConfig;
+  refresher: ReturnType<typeof createGoUsageRefresher>;
+  version: number;
+}) {
+  const theme = usePlugin().theme;
+  const [collapsed, setCollapsed] = createSignal(false);
+  const visible = createMemo(() => {
+    props.version;
+    return goUsageSectionVisible(props.config, props.state.goProviders.usesOpenCodeGo(props.sessionID));
+  });
+  const rows = createMemo<GoUsageRow[] | undefined>(() => {
+    props.version;
+    return visible() ? goUsageRows(props.refresher.state, Date.now()) : undefined;
+  });
+  const error = createMemo(() => {
+    props.version;
+    return props.refresher.state.error;
+  });
+
+  createEffect(() => {
+    if (visible()) void props.refresher.refresh();
+  });
+
+  return (
+    <Show when={visible() && (rows() !== undefined || error() !== undefined)}>
+      <Section title="Go Usage" collapsed={collapsed()} onToggle={() => setCollapsed((current) => !current)}>
+        <Show
+          when={error()}
+          fallback={<For each={rows() ?? []}>{(row) => <text fg={theme.text.muted}>{formatGoUsageRow(row)}</text>}</For>}
+        >
+          {(message) => <text fg={theme.text.feedback.error.base}>{`Go usage: ${message()}`}</text>}
+        </Show>
+      </Section>
+    </Show>
+  );
+}
+
+function CopilotUsageSection(props: {
+  sessionID: string;
+  state: InsightState;
+  config: InsightsConfig;
+  token: string;
+  refresher: ReturnType<typeof createCopilotUsageRefresher>;
+  version: number;
+}) {
+  const theme = usePlugin().theme;
+  const [collapsed, setCollapsed] = createSignal(false);
+  const visible = createMemo(() => {
+    props.version;
+    return copilotUsageSectionVisible(props.config, props.token, props.state.copilotProviders.usesCopilot(props.sessionID));
+  });
+  const row = createMemo(() => {
+    props.version;
+    const data = props.refresher.state.data;
+    return visible() && data ? copilotUsageRow(data, Date.now()) : undefined;
+  });
+  const error = createMemo(() => {
+    props.version;
+    return props.refresher.state.error;
+  });
+
+  createEffect(() => {
+    if (visible()) void props.refresher.refresh();
+  });
+
+  return (
+    <Show when={visible() && (row() !== undefined || error() !== undefined)}>
+      <Section title="Copilot" collapsed={collapsed()} onToggle={() => setCollapsed((current) => !current)}>
+        <Show
+          when={error()}
+          fallback={
+            <For each={row() ? formatCopilotUsageRow(row()!).split("\n") : []}>
+              {(line) => <text fg={theme.text.muted}>{line}</text>}
+            </For>
+          }
+        >
+          {(message) => <text fg={theme.text.feedback.error.base}>{`Copilot: ${message()}`}</text>}
+        </Show>
+      </Section>
+    </Show>
+  );
+}
+
 async function setup(context: Context) {
   const config = await readInsightsConfig({ dataDir: context.options.dataDir });
   const activity = createActivityState();
@@ -254,6 +353,9 @@ async function setup(context: Context) {
     goProviders: createGoProviderTracker(),
     copilotProviders: createCopilotProviderTracker()
   });
+  const token = resolveCopilotToken(config.copilotUsage);
+  const goUsage = createGoUsageRefresher(config.goUsage);
+  const copilotUsage = createCopilotUsageRefresher(config.copilotUsage, token);
 
   const [metricsRev, setMetricsRev] = createSignal(0);
   const [activityRev, setActivityRev] = createSignal(0);
@@ -296,6 +398,21 @@ async function setup(context: Context) {
           sessionID={input.sessionID}
           state={state}
           version={metricsRev() + activityRev() + subagentsRev() + now()}
+        />
+        <GoUsageSection
+          sessionID={input.sessionID}
+          state={state}
+          config={config}
+          refresher={goUsage}
+          version={metricsRev() + now()}
+        />
+        <CopilotUsageSection
+          sessionID={input.sessionID}
+          state={state}
+          config={config}
+          token={token}
+          refresher={copilotUsage}
+          version={metricsRev() + now()}
         />
         <SubagentsSection sessionID={input.sessionID} state={state} version={subagentsRev() + now()} />
       </box>

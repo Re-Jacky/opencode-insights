@@ -45,4 +45,16 @@ describe("V2 TUI plugin shell", () => {
     expect(text).toContain("onMouseMove");
     expect(text).toContain("theme.background.raised.base");
   });
+
+  test("renders provider-gated Go and Copilot usage sections", () => {
+    const text = source();
+    expect(text).toContain("GoUsageSection");
+    expect(text).toContain("CopilotUsageSection");
+    expect(text).toContain("goUsageSectionVisible");
+    expect(text).toContain("copilotUsageSectionVisible");
+    expect(text).toContain("goProviders");
+    expect(text).toContain("usesOpenCodeGo(");
+    expect(text).toContain("copilotProviders");
+    expect(text).toContain("usesCopilot(");
+  });
 });
