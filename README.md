@@ -1,157 +1,67 @@
 # opencode-insights
 
-Local OpenCode observability for live TPS, subagent status, and full-fidelity request/session inspection.
+Live OpenCode TUI sidebars for token/TPS metrics, session analysis, subagent status, and provider usage. V2-only.
 
 ## Install
 
-Install globally with OpenCode's plugin manager:
+Add the plugin to OpenCode's CLI plugin list:
 
-```bash
-opencode plugin @rejacky/opencode-insights --global
-```
-
-Restart OpenCode after installing the plugin.
-
-On startup, the plugin creates a user-local `opencode-insights` command shim in:
-
-```text
-~/.local/bin
-```
-
-Make sure that directory is on your `PATH`, then run the CLI directly:
-
-```bash
-opencode-insights doctor
-```
-
-## Update
-
-`opencode plugin` does not re-install or upgrade already-cached packages. To update to the latest version, clear the cached copy and reinstall:
-
-```bash
-rm -rf ~/.cache/opencode/packages/node_modules/@rejacky/opencode-insights
-opencode plugin @rejacky/opencode-insights --global
+```jsonc
+// ~/.config/opencode/cli.json
+{
+  "plugins": ["@rejacky/opencode-insights"]
+}
 ```
 
 Then restart OpenCode.
 
-You can also run the latest published version directly via `npx` without reinstalling:
+## Update
 
 ```bash
-npx -y -p @rejacky/opencode-insights opencode-insights doctor
+rm -rf ~/.cache/opencode/packages/node_modules/@rejacky/opencode-insights
 ```
 
-## Preview
-
-![opencode-insights TUI](assets/tui.png)
-
-Inspect captured sessions with the web viewer:
-
-```bash
-opencode-insights open
-```
-
-OpenCode Insights viewer listening at http://127.0.0.1:8765
-
-![opencode-insights web viewer](assets/insights.png)
-
-## Uninstall
-
-Remove this plugin from `opencode.json` / `opencode.jsonc`, remove it from `tui.json`, and delete the local Insights database files:
-
-```bash
-opencode-insights uninstall
-```
-
-Preview the cleanup without changing files:
-
-```bash
-opencode-insights uninstall --dry-run
-```
-
-Keep captured data while removing only the plugin config entries:
-
-```bash
-opencode-insights uninstall --keep-data
-```
-
-Use a custom OpenCode config directory or data location:
-
-```bash
-opencode-insights uninstall --config-dir ~/.config/opencode --data-dir ~/.opencode-insights
-```
-
-After uninstalling, restart OpenCode. Packages installed with `opencode plugin ... --global` are stored under OpenCode's package cache. On macOS/Linux this is typically:
-
-```text
-~/.cache/opencode/packages
-```
-
-The `uninstall` command removes plugin config entries and local Insights data; it does not remove cached OpenCode package directories automatically.
+Then reinstall by restarting OpenCode, or bump the version in `cli.json` if you pin one.
 
 ## What You Get
 
-- Configurable live metrics in the OpenCode session prompt zone.
-- A collapsible session-wide `Token Usage` sidebar showing total tokens, response count, input/output/reasoning usage, cache read/write usage, and aggregate cache rate. It loads completed responses already present in the session and continues updating live.
-- An opt-in `Go Usage` sidebar showing OpenCode Go rolling/weekly/monthly usage limits for sessions that use the `opencode-go` provider.
-- An opt-in `Copilot Usage` sidebar showing GitHub Copilot premium-interaction quota, usage bar, and days until reset for sessions that use the `github-copilot` provider.
-- Subagent status (running, done, failed, elapsed time, and token/context usage) in the sidebar.
-- A collapsible `Session Analysis` sidebar showing the active session's aggregated activity (tool calls, skills, auto-compactions, warnings, model requests, subagent tree). Click it to open a detail dialog; its vertical scrollbar appears only when the content overflows the dialog.
-- Local capture of OpenCode hook/event data without redaction.
-- A local web viewer for reconstructed sessions, user turns, hidden request context, system/messages transforms, and assistant thinking/response sequences.
-- Native OpenCode footer components (project directory and version) remain visible — the plugin does not override `sidebar_footer` or `home_prompt_right` slots.
+- **Prompt-right metrics** in the session prompt footer, configurable and ordered by `promptRightMetrics`.
+- **Token Usage** sidebar: session-wide totals, response count, input/output/reasoning, cache read/write, and aggregate cache rate. It hydrates completed responses already present in the session and keeps updating live.
+- **Go Usage** sidebar (opt-in): OpenCode Go rolling/weekly/monthly limits, shown only when the session uses the `opencode-go` provider.
+- **Copilot Usage** sidebar (opt-in): GitHub Copilot premium-interaction quota, usage bar, and days until reset, shown only when the session uses the `github-copilot` provider.
+- **Subagents** sidebar: running/done/failed status, elapsed time, token/context usage, and per-subagent activity. Click a row to open that subagent session.
+- **Session Analysis** sidebar: aggregated tool calls, skills, auto-compactions, model requests, warnings, and the subagent tree. Click the header to open a scrollable detail dialog.
 
-The right sidebar contains the plugin sections: `Token Usage`, `Go Usage` (when enabled and the session uses `opencode-go`), `Copilot Usage` (when enabled and the session uses `github-copilot`), `Subagents`, and `Session Analysis`. Click any section header to collapse or expand it. Token usage is aggregated across the full session; prompt-right `used` and `cache` values continue to represent the latest completed assistant response.
+Click any section header to collapse or expand it. Prompt-right `used` and `cache` values reflect the latest completed assistant response; the Token Usage sidebar aggregates the whole session.
 
-## TUI Metrics Configuration
+## Configuration
 
-On TUI startup, Insights creates a configuration file beside its database:
+On startup the plugin creates a JSONC config file:
 
 ```text
-~/.opencode-insights/config.json
+~/.opencode-insights/config.jsonc
 ```
-
-With a custom database path, the configuration file is created in that database's directory. The default keeps the prompt-right display compact:
-
-```json
-{
-  "promptRightMetrics": ["tps", "avg", "used", "cache"]
-}
-```
-
-`promptRightMetrics` controls both the fields and their order. Supported values are `tps`, `avg`, `ttft`, `used`, `cache`, `input`, `output`, and `reasoning`. Values that are not recognized are ignored; an empty or invalid configuration uses the default. Restart OpenCode after editing this file.
-
-## Provider Usage Configuration
-
-The plugin can show usage sidebar sections for the AI provider used by the current session. Each section is opt-in, disabled by default, and only appears when the session uses the matching provider.
 
 ```jsonc
 {
   "promptRightMetrics": ["tps", "avg", "used", "cache"],
-  "goUsage": {
-    "enabled": false,
-    "cookie": "",
-    "workspaceID": "",
-    "refreshMs": 300000
-  },
-  "copilotUsage": {
-    "enabled": false,
-    "token": "",
-    "refreshMs": 300000
-  }
+  "goUsage": { "enabled": false, "cookie": "", "workspaceID": "", "refreshMs": 300000 },
+  "copilotUsage": { "enabled": false, "token": "", "refreshMs": 300000 }
 }
 ```
 
-### Go Usage
+`promptRightMetrics` controls both the fields and their order. Supported values are `tps`, `avg`, `ttft`, `used`, `cache`, `input`, `output`, and `reasoning`. Unrecognized values are ignored; an empty or invalid list falls back to the default. Restart OpenCode after editing.
 
-Shows rolling (5 hour), weekly, and monthly usage limits for OpenCode Go subscriptions. Only visible when the session uses the `opencode-go` provider.
+A legacy `~/.opencode-insights/config.json` is honored when `config.jsonc` does not exist.
+
+### Go Usage
 
 ```jsonc
 "goUsage": {
-  "enabled": true,        // set to true to activate
+  "enabled": true,         // set to true to activate
   "cookie": "Fe26.2**...", // auth session cookie from opencode.ai
   "workspaceID": "wrk_...", // visible in the console URL
-  "refreshMs": 300000      // poll interval (min 60000)
+  "refreshMs": 300000       // poll interval (min 60000)
 }
 ```
 
@@ -159,155 +69,28 @@ To get the cookie, log in to `https://opencode.ai`, open the workspace `/go` pag
 
 ### Copilot Usage
 
-Shows GitHub Copilot premium-interaction quota (used/total, progress bar, days until reset). Only visible when the session uses the `github-copilot` provider.
-
 ```jsonc
 "copilotUsage": {
-  "enabled": true,  // set to true to activate
-  "token": "",      // optional: manual token override
+  "enabled": true,    // set to true to activate
+  "token": "",        // optional: manual token override
   "refreshMs": 300000 // poll interval (min 60000)
 }
 ```
 
 The `token` field is optional. If empty, the plugin reads the token from OpenCode's auth store (`~/.local/share/opencode/auth.json` → `github-copilot.access`). No manual setup is needed if you authenticate with Copilot through OpenCode.
 
-The section displays:
-
-```
+```text
 ▼ Copilot
 Premium   84%  ████████░░  7d
           2942 / 3500
 ```
 
-When the quota is exhausted and overage is permitted, the bar fills to 100% and the percentage reflects actual usage.
+## Breaking Change: V2-only
 
-Restart OpenCode after editing this file.
+This plugin now targets OpenCode V2 (`@opencode/plugin@2.x`) as a TUI-only plugin. The previous V1 server plugin, local capture database, web viewer, and `opencode-insights` CLI have been removed.
 
-## Open The Viewer
+If you need those V1 features, stay on the `0.4.x` line. Upgrading to `1.x` requires OpenCode V2.
 
-Start the local web viewer and open it in your browser:
+## Privacy
 
-```bash
-opencode-insights open --limit 5000 --port 8765
-```
-
-Or run the server only:
-
-```bash
-opencode-insights serve --limit 5000 --port 8765
-```
-
-Then open:
-
-```text
-http://127.0.0.1:8765/
-```
-
-The viewer shows:
-
-- Project/session filters with subagent sessions nested under their parent session.
-- User-message rows only, with each row showing visible assistant steps and hidden context count.
-- A `Summary` view with the agent thinking/response sequence.
-- Collapsed hidden-context previews that expand to plain text system prompt or hidden prompt-like content.
-- A dark/light theme switcher.
-
-## Common Commands
-
-List recent raw captures:
-
-```bash
-opencode-insights recent --limit 20
-```
-
-List reconstructed sessions:
-
-```bash
-opencode-insights sessions --limit 5000
-```
-
-Print one reconstructed session:
-
-```bash
-opencode-insights show ses_xxx --limit 10000
-```
-
-Export one session to JSON:
-
-```bash
-opencode-insights export ses_xxx --limit 10000 --output ./session.json
-```
-
-Check DB path, table health, row counts, and SQLite readability:
-
-```bash
-opencode-insights doctor
-```
-
-Compact the local SQLite DB after heavy testing:
-
-```bash
-opencode-insights vacuum
-```
-
-Remove plugin config entries and delete local captured data:
-
-```bash
-opencode-insights uninstall
-```
-
-If the command is not available, confirm `~/.local/bin` is on `PATH`, or run the installed binary directly from OpenCode's package cache:
-
-```bash
-~/.cache/opencode/packages/node_modules/.bin/opencode-insights doctor
-```
-
-You can also run the published package through npm without relying on the OpenCode cache:
-
-```bash
-npx -y -p @rejacky/opencode-insights opencode-insights doctor
-```
-
-## Storage
-
-Default database path:
-
-```text
-~/.opencode-insights/insights.sqlite
-```
-
-If SQLite is unavailable in the plugin runtime, the fallback path is:
-
-```text
-~/.opencode-insights/insights.sqlite.jsonl
-```
-
-The database keeps one day of captures by default and auto-cleans older rows on
-startup and after new captures; `retentionDays` sets how many days to keep (`0`
-disables auto-cleaning).
-
-Storage settings live in the config file `~/.opencode-insights/config.jsonc` (JSONC —
-comments allowed). The plugin creates it on first run with `dbPath` commented out
-(uncomment to relocate the database) and `retentionDays` defaulting to 1:
-
-```jsonc
-{
-  // Database file. Default: ~/.opencode-insights/insights.sqlite
-  // "dbPath": "/absolute/path/to/insights.sqlite",
-  "retentionDays": 1,
-  "promptRightMetrics": ["tps", "avg", "used", "cache"],
-  "goUsage": { "enabled": false, "cookie": "", "workspaceID": "", "refreshMs": 300000 },
-  "copilotUsage": { "enabled": false, "token": "", "refreshMs": 300000 }
-}
-```
-
-A legacy `config.json` is still honored when `config.jsonc` does not exist. Plugin
-params such as `{ "dbPath": … }` in `opencode.json` are ignored after the upgrade —
-if you previously set `dbPath` or `retentionDays` there, copy those values into
-`~/.opencode-insights/config.jsonc`. CLI commands read the configured database path
-from this file; the former `--db`/`--data-dir`/`--retention-days` flags are removed.
-
-## Privacy Model
-
-This plugin intentionally does not redact anything. It stores data locally exactly as OpenCode exposes it to plugin hooks and events.
-
-Captured data can include prompts, system messages, provider metadata, API keys exposed inside hook payloads, tool arguments, headers, reasoning text, and response events. Use it only on machines where local full-fidelity capture is acceptable.
+This plugin stores nothing. It reads session, message, and token data from OpenCode's in-process V2 data API and renders it in the TUI. No prompts, responses, or headers are captured or persisted.
