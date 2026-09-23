@@ -19,6 +19,7 @@ const FIXTURE = await readFile(new URL("./fixtures/go-usage-page.html", import.m
 
 const ENABLED_CONFIG: InsightsConfig = {
   promptRightMetrics: ["tps"],
+  promptRightColor: "muted",
   goUsage: { enabled: true, cookie: "cookie", workspaceID: "wrk_1", refreshMs: 300_000 },
   copilotUsage: { enabled: false, token: "", refreshMs: 300_000 }
 };

@@ -1,4 +1,4 @@
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -23,11 +23,13 @@ describe("insights config", () => {
     const config = await readInsightsConfig({ dataDir: dir });
 
     expect(config.promptRightMetrics.length).toBeGreaterThan(0);
+    expect(config.promptRightColor).toBe("muted");
     expect(config.goUsage.enabled).toBe(false);
     expect(config.copilotUsage.enabled).toBe(false);
     expect(config).not.toHaveProperty("dbPath");
     expect(config).not.toHaveProperty("retentionDays");
     expect(existsSync(join(dir, "config.jsonc"))).toBe(true);
+    await expect(readFile(join(dir, "config.jsonc"), "utf8")).resolves.toContain('"promptRightColor": "muted"');
   });
 
   test("parses promptRightMetrics, goUsage, and copilotUsage from config.jsonc", async () => {
@@ -37,6 +39,7 @@ describe("insights config", () => {
       join(dir, "config.jsonc"),
       JSON.stringify({
         promptRightMetrics: ["tps", "output"],
+        promptRightColor: "success",
         goUsage: { enabled: true, cookie: "c", workspaceID: "w", refreshMs: 1000 },
         copilotUsage: { enabled: true, token: "t", refreshMs: 1000 }
       }),
@@ -46,9 +49,23 @@ describe("insights config", () => {
     const config = await readInsightsConfig({ dataDir: dir });
 
     expect(config.promptRightMetrics).toEqual(["tps", "output"]);
+    expect(config.promptRightColor).toBe("success");
     expect(config.goUsage).toEqual({ enabled: true, cookie: "c", workspaceID: "w", refreshMs: 60_000 });
     expect(config.copilotUsage.enabled).toBe(true);
     expect(config.copilotUsage.token).toBe("t");
+  });
+
+  test("uses muted when promptRightColor is missing or invalid", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "opencode-insights-config-"));
+    cleanup.push(dir);
+
+    await writeFile(join(dir, "config.jsonc"), JSON.stringify({}), "utf8");
+    const existingConfig = await readInsightsConfig({ dataDir: dir });
+    expect(existingConfig.promptRightColor).toBe("muted");
+
+    await writeFile(join(dir, "config.jsonc"), JSON.stringify({ promptRightColor: "#00ffff" }), "utf8");
+    const invalidConfig = await readInsightsConfig({ dataDir: dir });
+    expect(invalidConfig.promptRightColor).toBe("muted");
   });
 
   test("accepts total and maps the legacy used metric to total", async () => {

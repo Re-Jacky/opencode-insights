@@ -22,12 +22,16 @@ export type CopilotUsageConfig = {
   refreshMs: number;
 };
 
+export type PromptRightColor = "base" | "muted" | "info" | "success" | "warning" | "error";
+
 export type InsightsConfig = {
   promptRightMetrics: PromptRightMetric[];
+  promptRightColor: PromptRightColor;
   goUsage: GoUsageConfig;
   copilotUsage: CopilotUsageConfig;
 };
 
+const DEFAULT_PROMPT_RIGHT_COLOR: PromptRightColor = "muted";
 const DEFAULT_GO_USAGE_REFRESH_MS = 300_000;
 const DEFAULT_COPILOT_USAGE_REFRESH_MS = 300_000;
 const MIN_GO_USAGE_REFRESH_MS = 60_000;
@@ -90,6 +94,7 @@ function defaultInsightsConfigJsonc(): string {
   return [
     "{",
     `  "promptRightMetrics": ${JSON.stringify(DEFAULT_PROMPT_RIGHT_METRICS)},`,
+    `  "promptRightColor": ${JSON.stringify(DEFAULT_PROMPT_RIGHT_COLOR)},`,
     `  "goUsage": ${JSON.stringify(defaultGoUsageConfig())},`,
     `  "copilotUsage": ${JSON.stringify(defaultCopilotUsageConfig())}`,
     "}",
@@ -100,6 +105,7 @@ function defaultInsightsConfigJsonc(): string {
 function defaultInsightsConfig(): InsightsConfig {
   return {
     promptRightMetrics: [...DEFAULT_PROMPT_RIGHT_METRICS],
+    promptRightColor: DEFAULT_PROMPT_RIGHT_COLOR,
     goUsage: defaultGoUsageConfig(),
     copilotUsage: defaultCopilotUsageConfig()
   };
@@ -120,9 +126,21 @@ function insightsConfigFrom(value: unknown): InsightsConfig {
     : [];
   return {
     promptRightMetrics: metrics.length ? metrics : [...DEFAULT_PROMPT_RIGHT_METRICS],
+    promptRightColor: isPromptRightColor(record.promptRightColor) ? record.promptRightColor : DEFAULT_PROMPT_RIGHT_COLOR,
     goUsage: goUsageConfigFrom(record.goUsage),
     copilotUsage: copilotUsageConfigFrom(record.copilotUsage)
   };
+}
+
+function isPromptRightColor(value: unknown): value is PromptRightColor {
+  return (
+    value === "base" ||
+    value === "muted" ||
+    value === "info" ||
+    value === "success" ||
+    value === "warning" ||
+    value === "error"
+  );
 }
 
 function goUsageConfigFrom(value: unknown): GoUsageConfig {

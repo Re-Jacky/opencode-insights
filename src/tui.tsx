@@ -112,10 +112,16 @@ function PromptRight(props: {
   return (
     <Show when={text().length > 0}>
       <box flexDirection="row" justifyContent="flex-end" width="100%">
-        <text fg={theme.text.feedback.info.base}>{text()}</text>
+        <text fg={promptRightColor(theme, props.config.promptRightColor)}>{text()}</text>
       </box>
     </Show>
   );
+}
+
+function promptRightColor(theme: Context["theme"], color: InsightsConfig["promptRightColor"]) {
+  if (color === "base") return theme.text.base;
+  if (color === "muted") return theme.text.muted;
+  return theme.text.feedback[color].base;
 }
 
 function SessionAnalysisSection(props: {

@@ -107,8 +107,8 @@ prerelease version) to `latest` in `cli.json` and restart OpenCode.
 
 - **Prompt metrics** on their own line directly above the composer, configurable and ordered by `promptRightMetrics`. `tps` is a live estimate over a 5s window while the model streams (reasoning deltas included, so it shows while the model is thinking); `avg` reproduces the native message header's `tok/s` — Σ(output + reasoning) over every step of the current turn ÷ Σ(step `streamed − created` spans), reset when a new turn begins; `ttft` is the time to the first token of any kind. `total` includes input, output, reasoning, and cache read/write tokens; `input` includes regular input plus cache read/write tokens.
 - **Token Usage** sidebar: session-wide totals, response count, input/output/reasoning, cache read/write, and aggregate cache rate. It hydrates completed responses already present in the session and keeps updating live.
-- **Go Usage** sidebar (opt-in): OpenCode Go rolling/weekly/monthly limits, shown only when the session uses the `opencode-go` provider.
-- **Copilot Usage** sidebar (opt-in): GitHub Copilot premium-interaction quota, usage bar, and days until reset, shown only when the session uses the `github-copilot` provider.
+- **Go Usage** sidebar (opt-in): OpenCode Go rolling/weekly/monthly limits, shown only when the session uses the `opencode-go` provider. Shows the time until its next automatic refresh and includes a manual refresh control.
+- **Copilot Usage** sidebar (opt-in): GitHub Copilot premium-interaction quota, usage bar, and days until reset, shown only when the session uses the `github-copilot` provider. Shows the time until its next automatic refresh and includes a manual refresh control.
 - **Subagents** sidebar: native running/done/failed status, elapsed time, token totals, and per-subagent activity. Click a row to open that subagent session.
 - **Session Analysis** sidebar: aggregated tool calls, skills, auto-compactions, model requests, warnings, and the subagent tree. Click the header to open a scrollable detail dialog.
 
@@ -125,12 +125,13 @@ On startup the plugin creates a JSONC config file:
 ```jsonc
 {
   "promptRightMetrics": ["tps", "avg", "total", "cache"],
+  "promptRightColor": "muted",
   "goUsage": { "enabled": false, "cookie": "", "workspaceID": "", "refreshMs": 300000 },
   "copilotUsage": { "enabled": false, "token": "", "refreshMs": 300000 }
 }
 ```
 
-`promptRightMetrics` controls both the fields and their order. Supported values are `tps`, `avg`, `ttft`, `total`, `cache`, `input`, `output`, and `reasoning`. The previous `used` value is accepted as an alias for `total`. Unrecognized values are ignored; an empty or invalid list falls back to the default. Restart OpenCode after editing.
+`promptRightMetrics` controls both the fields and their order. Supported values are `tps`, `avg`, `ttft`, `total`, `cache`, `input`, `output`, and `reasoning`. The previous `used` value is accepted as an alias for `total`. Unrecognized values are ignored; an empty or invalid list falls back to the default. `promptRightColor` accepts the theme tokens `base`, `muted`, `info`, `success`, `warning`, and `error`; missing or invalid values fall back to `muted`. Restart OpenCode after editing.
 
 A legacy `~/.opencode-insights/config.json` is honored when `config.jsonc` does not exist.
 
@@ -181,8 +182,7 @@ drops the whole V1 stack:
 - ❌ the V1 server plugin entrypoint (the package is TUI-only now).
 
 The plugin is stateless: it reads OpenCode's in-process V2 data API and renders TUI
-sidebars. `retentionDays` and `dbPath` in `~/.opencode-insights/config.jsonc` are
-V1-only keys and are ignored if present.
+sidebars.
 
 If you need the capture stack, stay on the `0.4.x` line with OpenCode V1.
 

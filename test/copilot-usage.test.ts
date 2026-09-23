@@ -18,6 +18,7 @@ const FIXTURE: CopilotUsage = JSON.parse(
 
 const ENABLED_CONFIG: InsightsConfig = {
   promptRightMetrics: ["tps"],
+  promptRightColor: "muted",
   goUsage: { enabled: false, cookie: "", workspaceID: "", refreshMs: 300_000 },
   copilotUsage: { enabled: true, token: "ghp_test", refreshMs: 300_000 }
 };

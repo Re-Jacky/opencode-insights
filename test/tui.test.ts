@@ -35,8 +35,12 @@ describe("V2 TUI plugin shell", () => {
     expect(source()).toContain('justifyContent="flex-end"');
   });
 
-  test("uses the informational theme color for composer-top metrics", () => {
-    expect(source()).toContain("<text fg={theme.text.feedback.info.base}>{text()}</text>");
+  test("resolves the composer-top color from config theme tokens", () => {
+    const text = source();
+    expect(text).toContain("promptRightColor(theme, props.config.promptRightColor)");
+    expect(text).toContain('if (color === "base") return theme.text.base');
+    expect(text).toContain('if (color === "muted") return theme.text.muted');
+    expect(text).toContain("theme.text.feedback[color].base");
   });
 
   test("renders the session analysis sidebar and dialog", () => {
