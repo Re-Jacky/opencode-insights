@@ -65,9 +65,9 @@ export type SessionTokenUsage = {
   responseCount: number;
 };
 
-export type PromptRightMetric = "tps" | "avg" | "ttft" | "used" | "cache" | "input" | "output" | "reasoning";
+export type PromptRightMetric = "tps" | "avg" | "ttft" | "total" | "cache" | "input" | "output" | "reasoning";
 
-export const DEFAULT_PROMPT_RIGHT_METRICS: PromptRightMetric[] = ["tps", "avg", "used", "cache"];
+export const DEFAULT_PROMPT_RIGHT_METRICS: PromptRightMetric[] = ["tps", "avg", "total", "cache"];
 
 export type MetricsState = {
   streamSamplesBySession: Record<string, StreamSample[]>;
@@ -309,10 +309,10 @@ export function renderResponseMetricsText(state: MetricsState, sessionID: string
   const usage = state.latestResponseUsageBySession[sessionID];
   if (!usage || !hasTokenUsage(usage)) return "";
 
-  const used = sumTokens(usage);
+  const total = sumTokens(usage);
   const cacheRate = cacheReadRate(usage);
   const parts = [
-    used === undefined ? undefined : `${formatTokenCount(used)} used`,
+    total === undefined ? undefined : `${formatTokenCount(total)} total`,
     cacheRate === undefined ? undefined : `${formatPercent(cacheRate)} cache`,
     usage.outputTokens === undefined ? undefined : `${formatTokenCount(usage.outputTokens)} out`,
     usage.reasoningTokens === undefined ? undefined : `${formatTokenCount(usage.reasoningTokens)} think`
@@ -326,7 +326,8 @@ export function renderPromptRightMetricsText(
   options: { now?: number; idle?: boolean; metrics?: PromptRightMetric[] } = {}
 ) {
   const usage = state.latestResponseUsageBySession[sessionID];
-  const used = usage ? sumTokens(usage) : undefined;
+  const total = usage ? sumTokens(usage) : undefined;
+  const input = usage ? sumInputTokens(usage) : undefined;
   const cacheRate = usage ? cacheReadRate(usage) : undefined;
   const msgID = state.latestMessageIDBySession[sessionID];
   const hasPerMessage = !!msgID && !!state.messageMetricsByID[msgID];
@@ -336,9 +337,9 @@ export function renderPromptRightMetricsText(
     tps: `TPS ${liveTps(state, sessionID, options) ?? "-"}`,
     avg: `AVG ${avgVal ?? "-"}`,
     ttft: `TTFT ${ttftVal ?? "-"}`,
-    used: `${used === undefined ? "-" : formatTokenCount(used)} used`,
+    total: `${total === undefined ? "-" : formatTokenCount(total)} total`,
     cache: `${cacheRate === undefined ? "-" : formatPercent(cacheRate)} cache`,
-    input: `${usage?.inputTokens === undefined ? "-" : formatTokenCount(usage.inputTokens)} in`,
+    input: `${input === undefined ? "-" : formatTokenCount(input)} in`,
     output: `${usage?.outputTokens === undefined ? "-" : formatTokenCount(usage.outputTokens)} out`,
     reasoning: `${usage?.reasoningTokens === undefined ? "-" : formatTokenCount(usage.reasoningTokens)} think`
   };
@@ -518,6 +519,13 @@ function hasTokenUsage(usage: AssistantResponseUsage) {
 
 function sumTokens(usage: AssistantResponseUsage) {
   const values = [usage.inputTokens, usage.outputTokens, usage.reasoningTokens, usage.cacheReadTokens, usage.cacheWriteTokens].filter(
+    (value): value is number => typeof value === "number"
+  );
+  return values.length ? values.reduce((sum, value) => sum + value, 0) : undefined;
+}
+
+function sumInputTokens(usage: AssistantResponseUsage) {
+  const values = [usage.inputTokens, usage.cacheReadTokens, usage.cacheWriteTokens].filter(
     (value): value is number => typeof value === "number"
   );
   return values.length ? values.reduce((sum, value) => sum + value, 0) : undefined;

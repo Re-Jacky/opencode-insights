@@ -20,6 +20,7 @@ import { selectAnalysisDialogLayout, selectDialogSize } from "./dialog-size.js";
 import { getSubagentSidebarModel, sumSubagentTokens } from "./subagents.js";
 import {
   createGoUsageRefresher,
+  formatNextUsageUpdate,
   formatGoUsageRow,
   goUsageRows,
   goUsageSectionVisible,
@@ -111,7 +112,7 @@ function PromptRight(props: {
   return (
     <Show when={text().length > 0}>
       <box flexDirection="row" justifyContent="flex-end" width="100%">
-        <text fg={theme.text.muted}>{text()}</text>
+        <text fg={theme.text.feedback.info.base}>{text()}</text>
       </box>
     </Show>
   );
@@ -313,6 +314,50 @@ function SubagentsSection(props: { sessionID: string; state: InsightState; versi
   );
 }
 
+function UsageRefreshStatus(props: {
+  version: number;
+  refreshMs: number;
+  refresher: {
+    state: { lastFetchAt?: number | undefined; isRefreshing?: boolean | undefined };
+    refresh: (now?: number, force?: boolean) => Promise<boolean>;
+  };
+}) {
+  const theme = usePlugin().theme;
+  const [hovered, setHovered] = createSignal(false);
+  const [manualRefreshing, setManualRefreshing] = createSignal(false);
+  const nextUpdate = createMemo(() => {
+    props.version;
+    const remaining = formatNextUsageUpdate(props.refresher.state.lastFetchAt, props.refreshMs, Date.now());
+    return remaining === "now" || remaining === "pending" ? remaining : `in ${remaining}`;
+  });
+  const refreshLabel = createMemo(() => {
+    props.version;
+    return manualRefreshing() || props.refresher.state.isRefreshing ? "Refreshing…" : "↻ Refresh";
+  });
+  const refresh = async () => {
+    setManualRefreshing(true);
+    try {
+      await props.refresher.refresh(Date.now(), true);
+    } finally {
+      setManualRefreshing(false);
+    }
+  };
+
+  return (
+    <box flexDirection="row" gap={1}>
+      <text fg={theme.text.muted}>{`Next update: ${nextUpdate()}`}</text>
+      <text
+        fg={hovered() ? theme.text.base : theme.text.muted}
+        onMouseMove={() => setHovered(true)}
+        onMouseOut={() => setHovered(false)}
+        onMouseUp={() => void refresh()}
+      >
+        {refreshLabel()}
+      </text>
+    </box>
+  );
+}
+
 function GoUsageSection(props: {
   sessionID: string;
   state: InsightState;
@@ -336,7 +381,8 @@ function GoUsageSection(props: {
   });
 
   createEffect(() => {
-    if (visible()) void props.refresher.refresh();
+    props.version;
+    if (visible() && !props.refresher.state.isRefreshing) void props.refresher.refresh();
   });
 
   return (
@@ -348,6 +394,7 @@ function GoUsageSection(props: {
         >
           {(message) => <text fg={theme.text.feedback.error.base}>{`Go usage: ${message()}`}</text>}
         </Show>
+        <UsageRefreshStatus version={props.version} refreshMs={props.config.goUsage.refreshMs} refresher={props.refresher} />
       </Section>
     </Show>
   );
@@ -378,7 +425,8 @@ function CopilotUsageSection(props: {
   });
 
   createEffect(() => {
-    if (visible()) void props.refresher.refresh();
+    props.version;
+    if (visible() && !props.refresher.state.isRefreshing) void props.refresher.refresh();
   });
 
   return (
@@ -394,6 +442,11 @@ function CopilotUsageSection(props: {
         >
           {(message) => <text fg={theme.text.feedback.error.base}>{`Copilot: ${message()}`}</text>}
         </Show>
+        <UsageRefreshStatus
+          version={props.version}
+          refreshMs={props.config.copilotUsage.refreshMs}
+          refresher={props.refresher}
+        />
       </Section>
     </Show>
   );

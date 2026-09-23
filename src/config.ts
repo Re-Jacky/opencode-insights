@@ -116,7 +116,7 @@ function defaultCopilotUsageConfig(): CopilotUsageConfig {
 function insightsConfigFrom(value: unknown): InsightsConfig {
   const record = isRecord(value) ? value : {};
   const metrics = Array.isArray(record.promptRightMetrics)
-    ? record.promptRightMetrics.filter(isPromptRightMetric)
+    ? record.promptRightMetrics.map((metric) => (metric === "used" ? "total" : metric)).filter(isPromptRightMetric)
     : [];
   return {
     promptRightMetrics: metrics.length ? metrics : [...DEFAULT_PROMPT_RIGHT_METRICS],
@@ -154,7 +154,7 @@ function isPromptRightMetric(value: unknown): value is PromptRightMetric {
     value === "tps" ||
     value === "avg" ||
     value === "ttft" ||
-    value === "used" ||
+    value === "total" ||
     value === "cache" ||
     value === "input" ||
     value === "output" ||

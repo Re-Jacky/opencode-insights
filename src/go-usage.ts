@@ -66,6 +66,24 @@ export function formatReset(seconds: number): string {
   return `${minutes}m`;
 }
 
+export function formatNextUsageUpdate(lastFetchAt: number | undefined, refreshMs: number, now: number): string {
+  if (lastFetchAt === undefined) return "pending";
+  const totalSeconds = Math.max(0, Math.ceil((lastFetchAt + refreshMs - now) / 1000));
+  if (totalSeconds === 0) return "now";
+
+  const units: [number, string][] = [
+    [Math.floor(totalSeconds / 86_400), "d"],
+    [Math.floor((totalSeconds % 86_400) / 3_600), "h"],
+    [Math.floor((totalSeconds % 3_600) / 60), "m"],
+    [totalSeconds % 60, "s"]
+  ];
+  return units
+    .filter(([value]) => value > 0)
+    .slice(0, 2)
+    .map(([value, unit]) => `${value}${unit}`)
+    .join(" ");
+}
+
 const BLOCK_PARTIALS = ["", "▏", "▎", "▍", "▌", "▋", "▊", "▉"];
 
 export function formatUsageBar(usagePercent: number, width = 10): string {
@@ -112,6 +130,7 @@ export type GoUsageState = {
   data?: GoUsage | undefined;
   error?: string | undefined;
   lastFetchAt?: number | undefined;
+  isRefreshing?: boolean | undefined;
 };
 
 export type GoUsageRow = {
@@ -146,12 +165,13 @@ export function createGoUsageRefresher(config: GoUsageConfig, fetchImpl: typeof 
   const state: GoUsageState = {};
   let inflight: Promise<void> | undefined;
 
-  async function refresh(now = Date.now()): Promise<boolean> {
+  async function refresh(now = Date.now(), force = false): Promise<boolean> {
     if (inflight) {
       await inflight;
       return false;
     }
-    if (state.lastFetchAt !== undefined && now - state.lastFetchAt < config.refreshMs) return false;
+    if (!force && state.lastFetchAt !== undefined && now - state.lastFetchAt < config.refreshMs) return false;
+    state.isRefreshing = true;
     inflight = (async () => {
       try {
         state.data = await fetchGoUsage({ cookie: config.cookie, workspaceID: config.workspaceID }, fetchImpl);
@@ -160,6 +180,7 @@ export function createGoUsageRefresher(config: GoUsageConfig, fetchImpl: typeof 
         state.error = error instanceof Error ? error.message : String(error);
       } finally {
         state.lastFetchAt = now;
+        state.isRefreshing = false;
         inflight = undefined;
       }
     })();

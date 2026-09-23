@@ -37,6 +37,7 @@ export type CopilotUsageState = {
   data?: CopilotUsage | undefined;
   error?: string | undefined;
   lastFetchAt?: number | undefined;
+  isRefreshing?: boolean | undefined;
 };
 
 export class CopilotUsageError extends Error {}
@@ -116,12 +117,13 @@ export function createCopilotUsageRefresher(
   const state: CopilotUsageState = {};
   let inflight: Promise<void> | undefined;
 
-  async function refresh(now = Date.now()): Promise<boolean> {
+  async function refresh(now = Date.now(), force = false): Promise<boolean> {
     if (inflight) {
       await inflight;
       return false;
     }
-    if (state.lastFetchAt !== undefined && now - state.lastFetchAt < config.refreshMs) return false;
+    if (!force && state.lastFetchAt !== undefined && now - state.lastFetchAt < config.refreshMs) return false;
+    state.isRefreshing = true;
     inflight = (async () => {
       try {
         state.data = await fetchCopilotUsage(token, fetchImpl);
@@ -130,6 +132,7 @@ export function createCopilotUsageRefresher(
         state.error = error instanceof Error ? error.message : String(error);
       } finally {
         state.lastFetchAt = now;
+        state.isRefreshing = false;
         inflight = undefined;
       }
     })();

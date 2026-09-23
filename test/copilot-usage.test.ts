@@ -186,6 +186,24 @@ describe("createCopilotUsageRefresher", () => {
     expect(calls).toBe(2);
   });
 
+  test("manual refresh bypasses the cooldown and starts a new refresh interval", async () => {
+    let calls = 0;
+    const refresher = createCopilotUsageRefresher(
+      { ...ENABLED_CONFIG.copilotUsage, refreshMs: 100 },
+      "ghp_test",
+      async () => {
+        calls += 1;
+        return new Response(JSON.stringify(FIXTURE), { status: 200 });
+      }
+    );
+
+    await refresher.refresh(1_000);
+    expect(await refresher.refresh(1_050, true)).toBe(true);
+    expect(await refresher.refresh(1_100)).toBe(false);
+    expect(await refresher.refresh(1_150)).toBe(true);
+    expect(calls).toBe(3);
+  });
+
   test("reports an error on failed fetch", async () => {
     const refresher = createCopilotUsageRefresher(
       ENABLED_CONFIG.copilotUsage,

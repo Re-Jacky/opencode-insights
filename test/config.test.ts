@@ -51,6 +51,19 @@ describe("insights config", () => {
     expect(config.copilotUsage.token).toBe("t");
   });
 
+  test("accepts total and maps the legacy used metric to total", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "opencode-insights-config-"));
+    cleanup.push(dir);
+    await writeFile(join(dir, "config.jsonc"), JSON.stringify({ promptRightMetrics: ["total"] }), "utf8");
+
+    const config = await readInsightsConfig({ dataDir: dir });
+    expect(config.promptRightMetrics).toEqual(["total"]);
+
+    await writeFile(join(dir, "config.jsonc"), JSON.stringify({ promptRightMetrics: ["used"] }), "utf8");
+    const legacyConfig = await readInsightsConfig({ dataDir: dir });
+    expect(legacyConfig.promptRightMetrics).toEqual(["total"]);
+  });
+
   test("falls back to defaults on malformed jsonc", async () => {
     const dir = await mkdtemp(join(tmpdir(), "opencode-insights-config-"));
     cleanup.push(dir);

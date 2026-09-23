@@ -105,14 +105,14 @@ prerelease version) to `latest` in `cli.json` and restart OpenCode.
 
 ## What You Get
 
-- **Prompt metrics** on their own line directly above the composer, configurable and ordered by `promptRightMetrics`. `tps` is a live estimate over a 5s window while the model streams (reasoning deltas included, so it shows while the model is thinking); `avg` reproduces the native message header's `tok/s` — Σ(output + reasoning) over every step of the current turn ÷ Σ(step `streamed − created` spans), reset when a new turn begins; `ttft` is the time to the first token of any kind.
+- **Prompt metrics** on their own line directly above the composer, configurable and ordered by `promptRightMetrics`. `tps` is a live estimate over a 5s window while the model streams (reasoning deltas included, so it shows while the model is thinking); `avg` reproduces the native message header's `tok/s` — Σ(output + reasoning) over every step of the current turn ÷ Σ(step `streamed − created` spans), reset when a new turn begins; `ttft` is the time to the first token of any kind. `total` includes input, output, reasoning, and cache read/write tokens; `input` includes regular input plus cache read/write tokens.
 - **Token Usage** sidebar: session-wide totals, response count, input/output/reasoning, cache read/write, and aggregate cache rate. It hydrates completed responses already present in the session and keeps updating live.
 - **Go Usage** sidebar (opt-in): OpenCode Go rolling/weekly/monthly limits, shown only when the session uses the `opencode-go` provider.
 - **Copilot Usage** sidebar (opt-in): GitHub Copilot premium-interaction quota, usage bar, and days until reset, shown only when the session uses the `github-copilot` provider.
 - **Subagents** sidebar: native running/done/failed status, elapsed time, token totals, and per-subagent activity. Click a row to open that subagent session.
 - **Session Analysis** sidebar: aggregated tool calls, skills, auto-compactions, model requests, warnings, and the subagent tree. Click the header to open a scrollable detail dialog.
 
-Click any section header to collapse or expand it. Prompt `used` and `cache` values reflect the latest completed assistant response; the Token Usage sidebar aggregates the whole session.
+Click any section header to collapse or expand it. Prompt `total` and `cache` values reflect the latest completed assistant response; the Token Usage sidebar aggregates the whole session.
 
 ## Configuration
 
@@ -124,13 +124,13 @@ On startup the plugin creates a JSONC config file:
 
 ```jsonc
 {
-  "promptRightMetrics": ["tps", "avg", "used", "cache"],
+  "promptRightMetrics": ["tps", "avg", "total", "cache"],
   "goUsage": { "enabled": false, "cookie": "", "workspaceID": "", "refreshMs": 300000 },
   "copilotUsage": { "enabled": false, "token": "", "refreshMs": 300000 }
 }
 ```
 
-`promptRightMetrics` controls both the fields and their order. Supported values are `tps`, `avg`, `ttft`, `used`, `cache`, `input`, `output`, and `reasoning`. Unrecognized values are ignored; an empty or invalid list falls back to the default. Restart OpenCode after editing.
+`promptRightMetrics` controls both the fields and their order. Supported values are `tps`, `avg`, `ttft`, `total`, `cache`, `input`, `output`, and `reasoning`. The previous `used` value is accepted as an alias for `total`. Unrecognized values are ignored; an empty or invalid list falls back to the default. Restart OpenCode after editing.
 
 A legacy `~/.opencode-insights/config.json` is honored when `config.jsonc` does not exist.
 

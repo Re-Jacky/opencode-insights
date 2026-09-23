@@ -5,6 +5,7 @@ import {
   createGoProviderTracker,
   createGoUsageRefresher,
   fetchGoUsage,
+  formatNextUsageUpdate,
   formatGoUsageRow,
   formatReset,
   formatUsageBar,
@@ -51,6 +52,15 @@ describe("goUsageRows", () => {
     const rows = goUsageRows(state, 10_000 + 60_000);
     expect(rows?.[0]?.reset).toBe("2h 32m");
     expect(rows?.[0]?.usagePercent).toBe(12);
+  });
+});
+
+describe("formatNextUsageUpdate", () => {
+  test("formats the remaining refresh time and the due state", () => {
+    expect(formatNextUsageUpdate(undefined, 300_000, 1_000)).toBe("pending");
+    expect(formatNextUsageUpdate(1_000, 300_000, 1_000)).toBe("5m");
+    expect(formatNextUsageUpdate(1_000, 300_000, 240_000)).toBe("1m 1s");
+    expect(formatNextUsageUpdate(1_000, 300_000, 301_000)).toBe("now");
   });
 });
 
@@ -117,6 +127,23 @@ describe("createGoUsageRefresher", () => {
 
     await refresher.refresh(1_100);
     expect(calls).toBe(2);
+  });
+
+  test("manual refresh bypasses the cooldown and starts a new refresh interval", async () => {
+    let calls = 0;
+    const refresher = createGoUsageRefresher(
+      { ...ENABLED_CONFIG.goUsage, refreshMs: 100 },
+      async () => {
+        calls += 1;
+        return new Response(FIXTURE, { status: 200 });
+      }
+    );
+
+    await refresher.refresh(1_000);
+    expect(await refresher.refresh(1_050, true)).toBe(true);
+    expect(await refresher.refresh(1_100)).toBe(false);
+    expect(await refresher.refresh(1_150)).toBe(true);
+    expect(calls).toBe(3);
   });
 
   test("reports whether the refresh actually fetched", async () => {

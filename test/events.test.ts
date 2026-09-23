@@ -134,7 +134,7 @@ describe("applyInsightEvent", () => {
     });
   });
 
-  test("does not double-count tokens across multiple steps of one assistant message", () => {
+  test("accumulates every token bucket across steps of one assistant message", () => {
     const { state: s } = state();
     applyInsightEvent(s, {
       type: "session.step.started",
@@ -163,9 +163,15 @@ describe("applyInsightEvent", () => {
     });
 
     const usage = s.metrics.responseUsageByMessageID["msg_1"];
-    expect(usage?.usage.outputTokens).toBe(7);
-    expect(usage?.usage.reasoningTokens).toBe(3);
-    expect(usage?.usage.inputTokens).toBe(8);
+    expect(usage?.usage).toEqual({
+      inputTokens: 13,
+      outputTokens: 7,
+      reasoningTokens: 3,
+      cacheReadTokens: 1,
+      cacheWriteTokens: 1,
+      finish: "stop"
+    });
+    expect(s.metrics.sessionTokenUsageByID["ses_a"]?.totalTokens).toBe(25);
   });
 
   test("records usage for tool-call steps, which are their own assistant messages", () => {

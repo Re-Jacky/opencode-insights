@@ -103,16 +103,17 @@ describe("metrics tracking", () => {
     });
 
     expect(renderResponseMetricsText(state, "ses_1")).toBe(
-      "10.4k used | 90.00% cache | 200 out | 50 think"
+      "10.4k total | 90.00% cache | 200 out | 50 think"
     );
     // A response with no `time.streamed` contributes no AVG, like the native
     // header (which needs the stream span to compute tok/s).
     expect(renderPromptRightMetricsText(state, "ses_1", { idle: true })).toBe(
-      "TPS - | AVG - | 10.4k used | 90.00% cache"
+      "TPS - | AVG - | 10.4k total | 90.00% cache"
     );
-    expect(renderPromptRightMetricsText(state, "ses_1", { idle: true, metrics: ["used", "cache"] })).toBe(
-      "10.4k used | 90.00% cache"
+    expect(renderPromptRightMetricsText(state, "ses_1", { idle: true, metrics: ["total", "cache"] })).toBe(
+      "10.4k total | 90.00% cache"
     );
+    expect(renderPromptRightMetricsText(state, "ses_1", { idle: true, metrics: ["input"] })).toBe("10.1k in");
   });
 
   test("hides latest response metrics until the provider reports token usage", () => {
@@ -126,7 +127,7 @@ describe("metrics tracking", () => {
 
     expect(renderResponseMetricsText(state, "ses_1")).toBe("");
     expect(renderPromptRightMetricsText(state, "ses_1", { idle: true })).toBe(
-      "TPS - | AVG - | - used | - cache"
+      "TPS - | AVG - | - total | - cache"
     );
   });
 

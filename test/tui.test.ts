@@ -35,6 +35,10 @@ describe("V2 TUI plugin shell", () => {
     expect(source()).toContain('justifyContent="flex-end"');
   });
 
+  test("uses the informational theme color for composer-top metrics", () => {
+    expect(source()).toContain("<text fg={theme.text.feedback.info.base}>{text()}</text>");
+  });
+
   test("renders the session analysis sidebar and dialog", () => {
     const text = source();
     expect(text).toContain("SessionAnalysisSection");
@@ -74,5 +78,14 @@ describe("V2 TUI plugin shell", () => {
     expect(text).toContain("usesOpenCodeGo(");
     expect(text).toContain("copilotProviders");
     expect(text).toContain("usesCopilot(");
+  });
+
+  test("shows refresh countdowns and manual refresh controls for both usage panels", () => {
+    const text = source();
+    expect(text).toContain("formatNextUsageUpdate");
+    expect(text).toContain("Next update: ${nextUpdate()}");
+    expect(text).toContain('"↻ Refresh"');
+    expect(text.match(/<UsageRefreshStatus/g)).toHaveLength(2);
+    expect(text).toContain("refresh(Date.now(), true)");
   });
 });

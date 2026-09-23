@@ -136,9 +136,9 @@ export function applyInsightEvent(state: InsightState, event: unknown): InsightE
       if (step) {
         const previous = state.stepUsageByMessage[messageID];
         state.stepUsageByMessage[messageID] = {
-          inputTokens: step.inputTokens,
-          cacheReadTokens: step.cacheReadTokens,
-          cacheWriteTokens: step.cacheWriteTokens,
+          inputTokens: (previous?.inputTokens ?? 0) + step.inputTokens,
+          cacheReadTokens: (previous?.cacheReadTokens ?? 0) + step.cacheReadTokens,
+          cacheWriteTokens: (previous?.cacheWriteTokens ?? 0) + step.cacheWriteTokens,
           outputTokens: (previous?.outputTokens ?? 0) + step.outputTokens,
           reasoningTokens: (previous?.reasoningTokens ?? 0) + step.reasoningTokens
         };
