@@ -108,7 +108,7 @@ prerelease version) to `latest` in `cli.json` and restart OpenCode.
 - **Prompt metrics** on their own line directly above the composer, configurable and ordered by `promptRightMetrics`. `tps` is a live estimate over a 5s window while the model streams (reasoning deltas included, so it shows while the model is thinking); `avg` reproduces the native message header's `tok/s` — Σ(output + reasoning) over every step of the current turn ÷ Σ(step `streamed − created` spans), reset when a new turn begins; `ttft` is the time to the first token of any kind. `total` includes input, output, reasoning, and cache read/write tokens; `input` includes regular input plus cache read/write tokens.
 - **Token Usage** sidebar: session-wide totals, response count, input/output/reasoning, cache read/write, and aggregate cache rate. It hydrates completed responses already present in the session and keeps updating live.
 - **Go Usage** sidebar (opt-in): OpenCode Go rolling/weekly/monthly limits, shown only when the session uses the `opencode-go` provider. Shows the time until its next automatic refresh and includes a manual refresh control.
-- **Copilot Usage** sidebar (opt-in): GitHub Copilot premium-interaction quota, usage bar, and days until reset, shown only when the session uses the `github-copilot` provider. Shows the time until its next automatic refresh and includes a manual refresh control.
+- **Copilot Usage** sidebar (opt-in): GitHub Copilot premium-interaction quota, usage bar, and days until reset, shown only when the session uses the `github-copilot` provider. It follows the active OpenCode Copilot account, and shows the time until its next automatic refresh with a manual refresh control.
 - **Subagents** sidebar: native running/done/failed status, elapsed time, token totals, and per-subagent activity. Click a row to open that subagent session.
 - **Session Analysis** sidebar: aggregated tool calls, skills, auto-compactions, model requests, warnings, and the subagent tree. Click the header to open a scrollable detail dialog.
 
@@ -161,7 +161,7 @@ only shows data for a workspace with an active Go subscription.
 }
 ```
 
-The `token` field is optional. If empty, the plugin reads the token from OpenCode's auth store (`~/.local/share/opencode/auth.json` → `github-copilot.access`). No manual setup is needed if you authenticate with Copilot through OpenCode.
+The `token` field is optional and overrides OpenCode account selection when provided. If empty, the plugin asks OpenCode for its active `github-copilot` credential and uses its OAuth access token (falling back to the refresh token if the access token is empty). The plugin re-reads the active credential when OpenCode accounts change. Older OpenCode versions without the credential-list API fall back to the legacy `~/.local/share/opencode/auth.json` entry. No manual setup is needed if you authenticate with Copilot through OpenCode.
 
 ```text
 ▼ Copilot

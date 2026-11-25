@@ -84,6 +84,15 @@ describe("V2 TUI plugin shell", () => {
     expect(text).toContain("usesCopilot(");
   });
 
+  test("loads the active Copilot credential and resyncs when accounts change", () => {
+    const text = source();
+    expect(text).toContain("credentialList.call(credentialClient)");
+    expect(text).toContain('details.type === "credential.switched"');
+    expect(text).toContain('details.type === "credential.updated"');
+    expect(text).toContain("resolveCopilotToken(config.copilotUsage, response)");
+    expect(text).toContain("context.data.session.get(props.sessionID)?.model?.providerID");
+  });
+
   test("shows refresh countdowns and manual refresh controls for both usage panels", () => {
     const text = source();
     expect(text).toContain("formatNextUsageUpdate");

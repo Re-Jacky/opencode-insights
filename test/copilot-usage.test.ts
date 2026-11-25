@@ -205,6 +205,52 @@ describe("createCopilotUsageRefresher", () => {
     expect(calls).toBe(3);
   });
 
+  test("uses the newly selected account token on the next refresh", async () => {
+    const requestedTokens: string[] = [];
+    const refresher = createCopilotUsageRefresher(
+      ENABLED_CONFIG.copilotUsage,
+      "first-account",
+      async (_url, init) => {
+        const authorization = (init?.headers as Record<string, string> | undefined)?.Authorization ?? "";
+        const token = authorization.replace("Bearer ", "");
+        requestedTokens.push(token);
+        return new Response(JSON.stringify({ ...FIXTURE, copilot_plan: token }), { status: 200 });
+      }
+    );
+
+    await refresher.refresh(1_000);
+    expect(refresher.setToken("active-account")).toBe(true);
+    await refresher.refresh(2_000);
+
+    expect(requestedTokens).toEqual(["first-account", "active-account"]);
+    expect(refresher.state.data?.copilot_plan).toBe("active-account");
+  });
+
+  test("does not let an old account request overwrite usage after a switch", async () => {
+    let releaseOldRequest!: () => void;
+    const oldRequestGate = new Promise<void>((resolve) => {
+      releaseOldRequest = resolve;
+    });
+    const refresher = createCopilotUsageRefresher(
+      ENABLED_CONFIG.copilotUsage,
+      "old-account",
+      async (_url, init) => {
+        const authorization = (init?.headers as Record<string, string> | undefined)?.Authorization ?? "";
+        const token = authorization.replace("Bearer ", "");
+        if (token === "old-account") await oldRequestGate;
+        return new Response(JSON.stringify({ ...FIXTURE, copilot_plan: token }), { status: 200 });
+      }
+    );
+
+    const oldRefresh = refresher.refresh(1_000);
+    expect(refresher.setToken("new-account")).toBe(true);
+    await refresher.refresh(2_000, true);
+    releaseOldRequest();
+    await oldRefresh;
+
+    expect(refresher.state.data?.copilot_plan).toBe("new-account");
+  });
+
   test("reports an error on failed fetch", async () => {
     const refresher = createCopilotUsageRefresher(
       ENABLED_CONFIG.copilotUsage,

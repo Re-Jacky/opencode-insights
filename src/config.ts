@@ -180,8 +180,27 @@ function isPromptRightMetric(value: unknown): value is PromptRightMetric {
   );
 }
 
-export function resolveCopilotToken(config: CopilotUsageConfig): string {
+export function resolveCopilotToken(config: CopilotUsageConfig, credentials?: unknown): string {
   if (config.token.length > 0) return config.token;
+
+  if (credentials !== undefined) {
+    // The OpenCode SDK returns CredentialEntry[], while older clients may wrap it in { data }.
+    const entries = Array.isArray(credentials)
+      ? credentials
+      : isRecord(credentials) && Array.isArray(credentials.data)
+        ? credentials.data
+        : [];
+    const active = entries.find(
+      (credential) =>
+        isRecord(credential) && credential.integrationID === "github-copilot" && credential.active === true
+    );
+    if (!isRecord(active) || !isRecord(active.value) || active.value.type !== "oauth") return "";
+    const access = typeof active.value.access === "string" ? active.value.access : "";
+    const refresh = typeof active.value.refresh === "string" ? active.value.refresh : "";
+    return access || refresh;
+  }
+
+  // Older OpenCode versions stored a single provider credential in auth.json.
   try {
     const authPath = join(homedir(), ".local/share/opencode/auth.json");
     if (!existsSync(authPath)) return "";

@@ -414,11 +414,17 @@ function CopilotUsageSection(props: {
   refresher: ReturnType<typeof createCopilotUsageRefresher>;
   version: number;
 }) {
-  const theme = usePlugin().theme;
+  const context = usePlugin();
+  const theme = context.theme;
   const [collapsed, setCollapsed] = createSignal(false);
   const visible = createMemo(() => {
     props.version;
-    return copilotUsageSectionVisible(props.config, props.token, props.state.copilotProviders.usesCopilot(props.sessionID));
+    const providerID = context.data.session.get(props.sessionID)?.model?.providerID;
+    const usesCopilot =
+      providerID === undefined
+        ? props.state.copilotProviders.usesCopilot(props.sessionID)
+        : providerID === "github-copilot";
+    return copilotUsageSectionVisible(props.config, props.token, usesCopilot);
   });
   const row = createMemo(() => {
     props.version;
@@ -467,15 +473,49 @@ async function setup(context: Context) {
     goProviders: createGoProviderTracker(),
     copilotProviders: createCopilotProviderTracker()
   });
-  const token = resolveCopilotToken(config.copilotUsage);
+  // Keep the new credential-list API optional so older V2 hosts can use the legacy fallback.
+  const credentialClient = context.client.credential as typeof context.client.credential & {
+    list?: () => Promise<unknown>;
+  };
+  const credentialList = credentialClient.list;
+  const hasCredentialList = typeof credentialList === "function";
+  const initialToken =
+    config.copilotUsage.token.length > 0
+      ? config.copilotUsage.token
+      : config.copilotUsage.enabled && !hasCredentialList
+        ? resolveCopilotToken(config.copilotUsage)
+        : "";
+  const [copilotToken, setCopilotToken] = createSignal(initialToken);
   const goUsage = createGoUsageRefresher(config.goUsage);
-  const copilotUsage = createCopilotUsageRefresher(config.copilotUsage, token);
+  const copilotUsage = createCopilotUsageRefresher(config.copilotUsage, initialToken);
 
   const [metricsRev, setMetricsRev] = createSignal(0);
   const [activityRev, setActivityRev] = createSignal(0);
   const [subagentsRev, setSubagentsRev] = createSignal(0);
   const [now, setNow] = createSignal(Date.now());
   const ticker = setInterval(() => setNow(Date.now()), 1_000);
+
+  let credentialSyncID = 0;
+  const updateCopilotToken = (token: string) => {
+    if (!copilotUsage.setToken(token)) return;
+    setCopilotToken(token);
+    setMetricsRev((value) => value + 1);
+  };
+  const syncCopilotToken = async () => {
+    if (!config.copilotUsage.enabled || config.copilotUsage.token.length > 0) return;
+    const syncID = ++credentialSyncID;
+    try {
+      if (!credentialList) {
+        updateCopilotToken(resolveCopilotToken(config.copilotUsage));
+        return;
+      }
+      const response = await credentialList.call(credentialClient);
+      if (syncID !== credentialSyncID) return;
+      updateCopilotToken(resolveCopilotToken(config.copilotUsage, response));
+    } catch {
+      // Best effort. If an account switch could not be read, don't fall back to a stale token.
+    }
+  };
 
   const stop = context.data.listen(({ details }) => {
     let result;
@@ -487,7 +527,23 @@ async function setup(context: Context) {
     if (result.metrics) setMetricsRev((value) => value + 1);
     if (result.activity) setActivityRev((value) => value + 1);
     if (result.subagents) setSubagentsRev((value) => value + 1);
+
+    if (
+      details.type === "credential.updated" ||
+      (details.type === "credential.switched" && details.data.integrationID === "github-copilot")
+    ) {
+      if (
+        details.type === "credential.switched" &&
+        config.copilotUsage.enabled &&
+        config.copilotUsage.token.length === 0
+      ) {
+        updateCopilotToken("");
+      }
+      void syncCopilotToken();
+    }
   });
+
+  if (config.copilotUsage.enabled && config.copilotUsage.token.length === 0) void syncCopilotToken();
 
   const hydrate = (sessionID: string) => {
     if (!isSessionID(sessionID) || !needsHydration(activity, sessionID)) return;
@@ -541,7 +597,7 @@ async function setup(context: Context) {
           sessionID={input.sessionID}
           state={state}
           config={config}
-          token={token}
+          token={copilotToken()}
           refresher={copilotUsage}
           version={metricsRev() + now()}
         />

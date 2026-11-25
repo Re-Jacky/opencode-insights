@@ -115,30 +115,55 @@ export function createCopilotUsageRefresher(
   fetchImpl: typeof fetch = fetch
 ) {
   const state: CopilotUsageState = {};
-  let inflight: Promise<void> | undefined;
+  const inflight = new Map<number, Promise<void>>();
+  let tokenVersion = 0;
+
+  function setToken(nextToken: string): boolean {
+    if (nextToken === token) return false;
+    token = nextToken;
+    tokenVersion += 1;
+    state.data = undefined;
+    state.error = undefined;
+    state.lastFetchAt = undefined;
+    state.isRefreshing = false;
+    return true;
+  }
 
   async function refresh(now = Date.now(), force = false): Promise<boolean> {
-    if (inflight) {
-      await inflight;
+    const requestToken = token;
+    const requestVersion = tokenVersion;
+    if (!requestToken) return false;
+
+    const existing = inflight.get(requestVersion);
+    if (existing) {
+      await existing;
       return false;
     }
     if (!force && state.lastFetchAt !== undefined && now - state.lastFetchAt < config.refreshMs) return false;
     state.isRefreshing = true;
-    inflight = (async () => {
+    const request = (async () => {
       try {
-        state.data = await fetchCopilotUsage(token, fetchImpl);
-        state.error = undefined;
+        const data = await fetchCopilotUsage(requestToken, fetchImpl);
+        if (requestVersion === tokenVersion) {
+          state.data = data;
+          state.error = undefined;
+        }
       } catch (error) {
-        state.error = error instanceof Error ? error.message : String(error);
+        if (requestVersion === tokenVersion) {
+          state.error = error instanceof Error ? error.message : String(error);
+        }
       } finally {
-        state.lastFetchAt = now;
-        state.isRefreshing = false;
-        inflight = undefined;
+        if (requestVersion === tokenVersion) {
+          state.lastFetchAt = now;
+          state.isRefreshing = false;
+        }
+        inflight.delete(requestVersion);
       }
     })();
-    await inflight;
+    inflight.set(requestVersion, request);
+    await request;
     return true;
   }
 
-  return { state, refresh };
+  return { state, refresh, setToken };
 }

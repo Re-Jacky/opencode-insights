@@ -94,6 +94,62 @@ describe("insights config", () => {
 
   test("resolveCopilotToken prefers the explicit config token", () => {
     const config: CopilotUsageConfig = { enabled: true, token: "explicit", refreshMs: 300_000 };
-    expect(resolveCopilotToken(config)).toBe("explicit");
+    expect(
+      resolveCopilotToken(config, [
+        {
+          integrationID: "github-copilot",
+          active: true,
+          value: { type: "oauth", access: "account-token", refresh: "refresh-token" }
+        }
+      ])
+    ).toBe("explicit");
+  });
+
+  test("uses the active Copilot account rather than an inactive account", () => {
+    const config: CopilotUsageConfig = { enabled: true, token: "", refreshMs: 300_000 };
+    const credentials = [
+      {
+        integrationID: "github-copilot",
+        active: false,
+        value: { type: "oauth", access: "previous-account", refresh: "previous-refresh" }
+      },
+      {
+        integrationID: "github-copilot",
+        active: true,
+        value: { type: "oauth", access: "active-account", refresh: "active-refresh" }
+      }
+    ];
+
+    expect(resolveCopilotToken(config, credentials)).toBe("active-account");
+  });
+
+  test("accepts credential-list results wrapped in a data property", () => {
+    const config: CopilotUsageConfig = { enabled: true, token: "", refreshMs: 300_000 };
+    const credential = {
+      integrationID: "github-copilot",
+      active: true,
+      value: { type: "oauth", access: "active-account", refresh: "active-refresh" }
+    };
+
+    expect(resolveCopilotToken(config, { data: [credential] })).toBe("active-account");
+  });
+
+  test("uses the active account refresh token when its access token is empty", () => {
+    const config: CopilotUsageConfig = { enabled: true, token: "", refreshMs: 300_000 };
+    const credentials = [
+      {
+        integrationID: "github-copilot",
+        active: true,
+        value: { type: "oauth", access: "", refresh: "active-refresh" }
+      }
+    ];
+
+    expect(resolveCopilotToken(config, credentials)).toBe("active-refresh");
+  });
+
+  test("does not fall back to another account when the credential list has no active Copilot account", () => {
+    const config: CopilotUsageConfig = { enabled: true, token: "", refreshMs: 300_000 };
+
+    expect(resolveCopilotToken(config, [])).toBe("");
   });
 });
